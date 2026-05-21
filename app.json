@@ -3,6 +3,7 @@
     "name": "Programme Alex",
     "slug": "mental-20",
     "version": "1.0.0",
+    "sdkVersion": "51.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0a0a0f",
