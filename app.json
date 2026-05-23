@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "Programme Alex",
-    "slug": "mental-20",
+    "slug": "mentale20",
     "version": "1.0.0",
     "sdkVersion": "51.0.0",
     "orientation": "portrait",
@@ -16,7 +16,7 @@
       },
       "package": "com.programmealex.app"
     },
-    "scheme": "mental-20",
+    "scheme": "mentale20",
     "extra": {
       "eas": {
         "projectId": "21d3aa65-0c0c-461b-9239-7896df9350e9"
