@@ -440,7 +440,7 @@ function ModelDownloadScreen({ onDownloaded }) {
         Phi-3 mini – IA locale
       </Text>
       <Text style={{ fontSize: 12, color: "#8B949E", textAlign: "center", marginBottom: 24, lineHeight: 18 }}>
-        Un modèle IA tourne 100% sur ton téléphone.{"
+        Un modèle IA tourne 100{'%'} sur ton téléphone.{"
 "}
         Téléchargement unique de 2.2 Go requis.{"
 "}
