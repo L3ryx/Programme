@@ -441,9 +441,8 @@ function SettingsModal({ visible, onClose, apiKey, onSave }) {
             <View style={settS.handle} />
             <Text style={settS.title}>⚙️  Paramètres Gemini</Text>
             <Text style={settS.subtitle}>
-              Entre ta clé API Google Gemini pour activer la génération IA.{"
-"}
-              Obtiens-la sur <Text style={settS.link}>aistudio.google.com</Text>
+              {"Entre ta clé API Google Gemini pour activer la génération IA.\nObtiens-la sur "}
+              <Text style={settS.link}>aistudio.google.com</Text>
             </Text>
 
             <Text style={settS.label}>CLÉ API GEMINI</Text>
