@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -8,21 +8,19 @@ import {
   StatusBar,
   Dimensions,
   Animated,
-  Image,
-  Modal,
+  Easing,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { alexGenerations, alexLikes, alexPsychology } from "./alexData";
 
 const { width, height } = Dimensions.get("window");
 
-// Couleurs cohérentes
 const C = {
   bg: "#0D1117",
   surface: "#161B22",
   surface2: "#1C2128",
   border: "#30363D",
-  accent: "#FF1493", // Rose/Pink
+  accent: "#FF1493",
   accentSoft: "#3D1A2A",
   accentBlue: "#58A6FF",
   danger: "#F85149",
@@ -31,65 +29,197 @@ const C = {
   textMuted: "#484F58",
 };
 
-// Intro animée
-function IntroScreen({ onFinish }) {
-  const [scaleAnim] = useState(new Animated.Value(0));
-  const [opacityAnim] = useState(new Animated.Value(1));
-  const [showExplosion, setShowExplosion] = useState(false);
+// Composant coeur SVG dessiné en React Native (pas de dépendance SVG)
+function HeartShape({ size = 100, color = C.accent, style }) {
+  // On simule le coeur avec deux cercles + un carré tourné
+  const s = size;
+  return (
+    <View style={[{ width: s, height: s, alignItems: "center", justifyContent: "center" }, style]}>
+      {/* Moitié gauche */}
+      <View style={{
+        position: "absolute",
+        width: s * 0.5,
+        height: s * 0.5,
+        borderRadius: s * 0.25,
+        backgroundColor: color,
+        top: s * 0.08,
+        left: s * 0.03,
+      }} />
+      {/* Moitié droite */}
+      <View style={{
+        position: "absolute",
+        width: s * 0.5,
+        height: s * 0.5,
+        borderRadius: s * 0.25,
+        backgroundColor: color,
+        top: s * 0.08,
+        right: s * 0.03,
+      }} />
+      {/* Bas du coeur */}
+      <View style={{
+        position: "absolute",
+        width: s * 0.72,
+        height: s * 0.72,
+        backgroundColor: color,
+        bottom: s * 0.04,
+        transform: [{ rotate: "45deg" }],
+        borderRadius: 6,
+      }} />
+    </View>
+  );
+}
+
+// Particule d'explosion
+function Particle({ delay, angle, distance, size, color }) {
+  const anim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Animation d'apparition du coeur
     Animated.sequence([
-      Animated.timing(scaleAnim, {
+      Animated.delay(delay),
+      Animated.timing(anim, {
         toValue: 1,
-        duration: 800,
+        duration: 700,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
-      Animated.delay(1500),
-      Animated.parallel([
-        Animated.timing(scaleAnim, {
-          toValue: 2,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(opacityAnim, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-      ]),
+    ]).start();
+  }, []);
+
+  const x = Math.cos(angle) * distance;
+  const y = Math.sin(angle) * distance;
+
+  return (
+    <Animated.View
+      style={{
+        position: "absolute",
+        width: size,
+        height: size,
+        borderRadius: size / 2,
+        backgroundColor: color,
+        opacity: anim.interpolate({ inputRange: [0, 0.6, 1], outputRange: [1, 1, 0] }),
+        transform: [
+          { translateX: anim.interpolate({ inputRange: [0, 1], outputRange: [0, x] }) },
+          { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [0, y] }) },
+          { scale: anim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [0, 1.5, 0.2] }) },
+        ],
+      }}
+    />
+  );
+}
+
+// Écran d'intro animé
+function IntroScreen({ onFinish }) {
+  // Phases : 0=apparition texte, 1=apparition coeur, 2=pulsation, 3=explosion, 4=fondu
+  const [phase, setPhase] = useState(0);
+  const [showParticles, setShowParticles] = useState(false);
+
+  const titleOpacity = useRef(new Animated.Value(0)).current;
+  const titleY = useRef(new Animated.Value(30)).current;
+
+  const heartScale = useRef(new Animated.Value(0)).current;
+  const heartOpacity = useRef(new Animated.Value(0)).current;
+
+  const pulseScale = useRef(new Animated.Value(1)).current;
+
+  const explosionScale = useRef(new Animated.Value(1)).current;
+  const explosionOpacity = useRef(new Animated.Value(1)).current;
+
+  const screenOpacity = useRef(new Animated.Value(1)).current;
+
+  // Génère les particules
+  const particles = Array.from({ length: 20 }, (_, i) => ({
+    id: i,
+    angle: (i / 20) * Math.PI * 2,
+    distance: 80 + Math.random() * 120,
+    size: 4 + Math.random() * 10,
+    delay: Math.random() * 150,
+    color: i % 3 === 0 ? "#FF1493" : i % 3 === 1 ? "#FF69B4" : "#FFB6C1",
+  }));
+
+  useEffect(() => {
+    // Phase 1 : titre apparaît
+    Animated.parallel([
+      Animated.timing(titleOpacity, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(titleY, { toValue: 0, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
     ]).start(() => {
-      setShowExplosion(true);
-      setTimeout(onFinish, 600);
+      setPhase(1);
+      // Phase 2 : coeur apparaît
+      Animated.parallel([
+        Animated.spring(heartScale, { toValue: 1, friction: 5, tension: 80, useNativeDriver: true }),
+        Animated.timing(heartOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+      ]).start(() => {
+        setPhase(2);
+        // Phase 3 : pulsation douce
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(pulseScale, { toValue: 1.12, duration: 500, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+            Animated.timing(pulseScale, { toValue: 1, duration: 500, easing: Easing.inOut(Easing.sin), useNativeDriver: true }),
+          ]),
+          { iterations: 2 }
+        ).start(() => {
+          setPhase(3);
+          // Phase 4 : explosion
+          setShowParticles(true);
+          Animated.parallel([
+            Animated.timing(explosionScale, { toValue: 8, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+            Animated.timing(explosionOpacity, { toValue: 0, duration: 500, easing: Easing.in(Easing.cubic), useNativeDriver: true }),
+          ]).start(() => {
+            // Phase 5 : fondu écran
+            setTimeout(() => {
+              Animated.timing(screenOpacity, { toValue: 0, duration: 500, useNativeDriver: true }).start(onFinish);
+            }, 300);
+          });
+        });
+      });
     });
   }, []);
 
   return (
-    <View style={[styles.introContainer, { backgroundColor: C.bg }]}>
-      <Text style={styles.introTitle}>Lexou</Text>
+    <Animated.View style={[styles.introContainer, { opacity: screenOpacity }]}>
+      <StatusBar barStyle="light-content" backgroundColor="#000000" />
 
-      {!showExplosion && (
+      {/* Lueur de fond */}
+      <View style={styles.introGlow} />
+
+      {/* Titre LEXOU */}
+      <Animated.Text
+        style={[
+          styles.introTitle,
+          { opacity: titleOpacity, transform: [{ translateY: titleY }] },
+        ]}
+      >
+        Lexou
+      </Animated.Text>
+
+      {/* Coeur animé */}
+      {phase >= 1 && (
         <Animated.View
-          style={[
-            styles.heartContainer,
-            {
-              transform: [{ scale: scaleAnim }],
-              opacity: opacityAnim,
-            },
-          ]}
+          style={{
+            transform: [
+              { scale: Animated.multiply(heartScale, pulseScale) },
+              {
+                scale: phase >= 3
+                  ? Animated.multiply(heartScale, explosionScale)
+                  : Animated.multiply(heartScale, pulseScale),
+              },
+            ],
+            opacity: phase >= 3 ? explosionOpacity : heartOpacity,
+            marginTop: 30,
+          }}
         >
-          <Text style={styles.heartEmoji}>❤️</Text>
+          <HeartShape size={120} color={C.accent} />
         </Animated.View>
       )}
 
-      {showExplosion && (
-        <View style={styles.explosionContainer}>
-          <Text style={styles.explosionEmoji}>💥</Text>
-          <Text style={[styles.explosionEmoji, { opacity: 0.6 }]}>✨</Text>
-          <Text style={[styles.explosionEmoji, { opacity: 0.4 }]}>⭐</Text>
+      {/* Particules d'explosion */}
+      {showParticles && (
+        <View style={styles.particlesContainer}>
+          {particles.map((p) => (
+            <Particle key={p.id} {...p} />
+          ))}
         </View>
       )}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -97,22 +227,15 @@ function IntroScreen({ onFinish }) {
 function MainScreen() {
   const [activeTab, setActiveTab] = useState("generator");
   const [generationIndex, setGenerationIndex] = useState(0);
-  const [likes, setLikes] = useState([...alexLikes]);
 
   const currentGeneration = alexGenerations[generationIndex];
 
   const handleNextGeneration = () => {
-    setGenerationIndex((prev) =>
-      prev === alexGenerations.length - 1 ? 0 : prev + 1
-    );
+    setGenerationIndex((prev) => (prev === alexGenerations.length - 1 ? 0 : prev + 1));
   };
-
   const handlePreviousGeneration = () => {
-    setGenerationIndex((prev) =>
-      prev === 0 ? alexGenerations.length - 1 : prev - 1
-    );
+    setGenerationIndex((prev) => (prev === 0 ? alexGenerations.length - 1 : prev - 1));
   };
-
   const handleRandomGeneration = () => {
     setGenerationIndex(Math.floor(Math.random() * alexGenerations.length));
   };
@@ -121,75 +244,39 @@ function MainScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: C.bg }]}>
       <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      {/* Tabs */}
       <View style={styles.tabsContainer}>
-        <TouchableOpacity
-          style={[
-            styles.tab,
-            activeTab === "generator" && styles.tabActive,
-          ]}
-          onPress={() => setActiveTab("generator")}
-        >
-          <Text style={styles.tabText}>🎲 Générateur</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "likes" && styles.tabActive]}
-          onPress={() => setActiveTab("likes")}
-        >
-          <Text style={styles.tabText}>❤️ Likes</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === "brain" && styles.tabActive]}
-          onPress={() => setActiveTab("brain")}
-        >
-          <Text style={styles.tabText}>🧠 Psycho</Text>
-        </TouchableOpacity>
+        {[
+          { key: "generator", label: "🎲 Générateur" },
+          { key: "likes", label: "❤️ Likes" },
+          { key: "brain", label: "🧠 Psycho" },
+        ].map((tab) => (
+          <TouchableOpacity
+            key={tab.key}
+            style={[styles.tab, activeTab === tab.key && styles.tabActive]}
+            onPress={() => setActiveTab(tab.key)}
+          >
+            <Text style={styles.tabText}>{tab.label}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
-      {/* Generator Tab */}
       {activeTab === "generator" && (
-        <ScrollView
-          style={styles.contentContainer}
-          contentContainerStyle={styles.contentInner}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={styles.contentContainer} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
           <View style={styles.generatorCard}>
             <View style={styles.generationHeader}>
-              <Text style={styles.generationCounter}>
-                {generationIndex + 1} / {alexGenerations.length}
-              </Text>
-              <Text style={styles.generationEmoji}>
-                {currentGeneration.emoji}
-              </Text>
+              <Text style={styles.generationCounter}>{generationIndex + 1} / {alexGenerations.length}</Text>
+              <Text style={styles.generationEmoji}>{currentGeneration.emoji}</Text>
             </View>
-
-            <Text style={styles.generationCategory}>
-              {currentGeneration.category.toUpperCase()}
-            </Text>
-
-            <Text style={styles.generationText}>
-              {currentGeneration.text}
-            </Text>
-
+            <Text style={styles.generationCategory}>{currentGeneration.category.toUpperCase()}</Text>
+            <Text style={styles.generationText}>{currentGeneration.text}</Text>
             <View style={styles.buttonContainer}>
-              <TouchableOpacity
-                style={[styles.button, styles.buttonSecondary]}
-                onPress={handlePreviousGeneration}
-              >
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary]} onPress={handlePreviousGeneration}>
                 <Text style={styles.buttonText}>← Précédent</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.buttonPrimary]}
-                onPress={handleRandomGeneration}
-              >
+              <TouchableOpacity style={[styles.button, styles.buttonPrimary]} onPress={handleRandomGeneration}>
                 <Text style={styles.buttonText}>🎲 Aléatoire</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.button, styles.buttonSecondary]}
-                onPress={handleNextGeneration}
-              >
+              <TouchableOpacity style={[styles.button, styles.buttonSecondary]} onPress={handleNextGeneration}>
                 <Text style={styles.buttonText}>Suivant →</Text>
               </TouchableOpacity>
             </View>
@@ -197,13 +284,8 @@ function MainScreen() {
         </ScrollView>
       )}
 
-      {/* Likes Tab */}
       {activeTab === "likes" && (
-        <ScrollView
-          style={styles.contentContainer}
-          contentContainerStyle={styles.contentInner}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={styles.contentContainer} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionTitle}>Ce qu'Alex aime</Text>
           <View style={styles.likesGrid}>
             {alexLikes.map((like, index) => (
@@ -216,113 +298,77 @@ function MainScreen() {
         </ScrollView>
       )}
 
-      {/* Brain/Psychology Tab */}
       {activeTab === "brain" && (
-        <ScrollView
-          style={styles.contentContainer}
-          contentContainerStyle={styles.contentInner}
-          showsVerticalScrollIndicator={false}
-        >
+        <ScrollView style={styles.contentContainer} contentContainerStyle={styles.contentInner} showsVerticalScrollIndicator={false}>
           <Text style={styles.sectionTitle}>Psychologie d'Alex</Text>
-
           <View style={styles.brainCard}>
             <Text style={styles.brainEmoji}>🧠</Text>
             <Text style={styles.brainSummary}>{alexPsychology.summary}</Text>
           </View>
-
-          {/* Atouts */}
-          <View style={styles.section}>
-            <Text style={styles.sectionSubtitle}>✨ Atouts</Text>
-            {alexPsychology.atouts.map((atout, index) => (
-              <View key={index} style={styles.traitItem}>
-                <Text style={styles.traitBullet}>•</Text>
-                <Text style={styles.traitText}>{atout}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Faiblesses */}
-          <View style={styles.section}>
-            <Text style={styles.sectionSubtitle}>⚠️ Faiblesses</Text>
-            {alexPsychology.faiblesses.map((faiblesse, index) => (
-              <View key={index} style={styles.traitItem}>
-                <Text style={[styles.traitBullet, { color: C.danger }]}>
-                  •
-                </Text>
-                <Text style={styles.traitText}>{faiblesse}</Text>
-              </View>
-            ))}
-          </View>
-
-          {/* Traits */}
-          <View style={styles.section}>
-            <Text style={styles.sectionSubtitle}>🔍 Traits de caractère</Text>
-            {alexPsychology.traits.map((trait, index) => (
-              <View key={index} style={styles.traitItem}>
-                <Text style={[styles.traitBullet, { color: C.accent }]}>
-                  •
-                </Text>
-                <Text style={styles.traitText}>{trait}</Text>
-              </View>
-            ))}
-          </View>
+          {[
+            { title: "✨ Atouts", items: alexPsychology.atouts, color: C.accent },
+            { title: "⚠️ Faiblesses", items: alexPsychology.faiblesses, color: C.danger },
+            { title: "🔍 Traits de caractère", items: alexPsychology.traits, color: C.accentBlue },
+          ].map((section) => (
+            <View key={section.title} style={styles.section}>
+              <Text style={[styles.sectionSubtitle, { color: section.color }]}>{section.title}</Text>
+              {section.items.map((item, index) => (
+                <View key={index} style={[styles.traitItem, { borderLeftColor: section.color }]}>
+                  <Text style={[styles.traitBullet, { color: section.color }]}>•</Text>
+                  <Text style={styles.traitText}>{item}</Text>
+                </View>
+              ))}
+            </View>
+          ))}
         </ScrollView>
       )}
     </SafeAreaView>
   );
 }
 
-// App principale
 export default function App() {
   const [showIntro, setShowIntro] = useState(true);
-
-  if (showIntro) {
-    return <IntroScreen onFinish={() => setShowIntro(false)} />;
-  }
-
-  return <MainScreen />;
+  return showIntro ? <IntroScreen onFinish={() => setShowIntro(false)} /> : <MainScreen />;
 }
 
-// Styles
 const styles = StyleSheet.create({
-  // Intro Styles
+  // Intro
   introContainer: {
     flex: 1,
-    justifyContent: "center",
+    backgroundColor: "#000000",
     alignItems: "center",
+    justifyContent: "center",
+  },
+  introGlow: {
+    position: "absolute",
+    width: 300,
+    height: 300,
+    borderRadius: 150,
+    backgroundColor: "#FF1493",
+    opacity: 0.08,
+    top: height / 2 - 150,
   },
   introTitle: {
-    fontSize: 60,
-    fontWeight: "bold",
-    color: C.accent,
-    marginBottom: 40,
+    fontSize: 72,
+    fontWeight: "800",
+    color: "#FFFFFF",
+    letterSpacing: 6,
+    textShadowColor: "#FF1493",
+    textShadowOffset: { width: 0, height: 0 },
+    textShadowRadius: 20,
   },
-  heartContainer: {
-    width: 100,
-    height: 100,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  heartEmoji: {
-    fontSize: 80,
-  },
-  explosionContainer: {
-    position: "relative",
-    width: 150,
-    height: 150,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  explosionEmoji: {
-    fontSize: 60,
+  particlesContainer: {
     position: "absolute",
+    width: 2,
+    height: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    top: height / 2 + 50,
+    left: width / 2,
   },
 
-  // Main Styles
-  container: {
-    flex: 1,
-    backgroundColor: C.bg,
-  },
+  // Main
+  container: { flex: 1 },
   tabsContainer: {
     flexDirection: "row",
     justifyContent: "space-around",
@@ -337,24 +383,10 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     backgroundColor: C.surface,
   },
-  tabActive: {
-    backgroundColor: C.accent,
-  },
-  tabText: {
-    color: C.textPrimary,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-  contentContainer: {
-    flex: 1,
-  },
-  contentInner: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 32,
-  },
-
-  // Generator Styles
+  tabActive: { backgroundColor: C.accent },
+  tabText: { color: C.textPrimary, fontWeight: "600", fontSize: 13 },
+  contentContainer: { flex: 1 },
+  contentInner: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
   generatorCard: {
     backgroundColor: C.surface,
     borderRadius: 16,
@@ -368,14 +400,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 12,
   },
-  generationCounter: {
-    color: C.textSecondary,
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  generationEmoji: {
-    fontSize: 32,
-  },
+  generationCounter: { color: C.textSecondary, fontSize: 13, fontWeight: "600" },
+  generationEmoji: { fontSize: 32 },
   generationCategory: {
     color: C.accent,
     fontSize: 12,
@@ -390,44 +416,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontStyle: "italic",
   },
-  buttonContainer: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  button: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: "center",
-  },
-  buttonPrimary: {
-    backgroundColor: C.accent,
-  },
-  buttonSecondary: {
-    backgroundColor: C.surface2,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  buttonText: {
-    color: C.textPrimary,
-    fontWeight: "600",
-    fontSize: 13,
-  },
-
-  // Likes Styles
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: "bold",
-    color: C.textPrimary,
-    marginBottom: 16,
-  },
-  likesGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "space-between",
-    gap: 12,
-  },
+  buttonContainer: { flexDirection: "row", justifyContent: "space-between", gap: 8 },
+  button: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: "center" },
+  buttonPrimary: { backgroundColor: C.accent },
+  buttonSecondary: { backgroundColor: C.surface2, borderWidth: 1, borderColor: C.border },
+  buttonText: { color: C.textPrimary, fontWeight: "600", fontSize: 13 },
+  sectionTitle: { fontSize: 24, fontWeight: "bold", color: C.textPrimary, marginBottom: 16 },
+  likesGrid: { flexDirection: "row", flexWrap: "wrap", justifyContent: "space-between", gap: 12 },
   likeCard: {
     width: "48%",
     backgroundColor: C.surface,
@@ -437,18 +432,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
-  likeEmoji: {
-    fontSize: 40,
-    marginBottom: 8,
-  },
-  likeText: {
-    color: C.textPrimary,
-    fontSize: 12,
-    textAlign: "center",
-    lineHeight: 18,
-  },
-
-  // Brain Styles
+  likeEmoji: { fontSize: 40, marginBottom: 8 },
+  likeText: { color: C.textPrimary, fontSize: 12, textAlign: "center", lineHeight: 18 },
   brainCard: {
     backgroundColor: C.surface,
     borderRadius: 12,
@@ -458,10 +443,7 @@ const styles = StyleSheet.create({
     borderColor: C.border,
     alignItems: "center",
   },
-  brainEmoji: {
-    fontSize: 48,
-    marginBottom: 12,
-  },
+  brainEmoji: { fontSize: 48, marginBottom: 12 },
   brainSummary: {
     color: C.textPrimary,
     fontSize: 14,
@@ -469,15 +451,8 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontStyle: "italic",
   },
-  section: {
-    marginBottom: 20,
-  },
-  sectionSubtitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: C.accent,
-    marginBottom: 12,
-  },
+  section: { marginBottom: 20 },
+  sectionSubtitle: { fontSize: 16, fontWeight: "700", marginBottom: 12 },
   traitItem: {
     flexDirection: "row",
     marginBottom: 8,
@@ -486,17 +461,7 @@ const styles = StyleSheet.create({
     backgroundColor: C.surface,
     borderRadius: 8,
     borderLeftWidth: 3,
-    borderLeftColor: C.accent,
   },
-  traitBullet: {
-    color: C.accent,
-    fontSize: 16,
-    marginRight: 8,
-  },
-  traitText: {
-    color: C.textPrimary,
-    fontSize: 13,
-    flex: 1,
-    lineHeight: 20,
-  },
+  traitBullet: { fontSize: 16, marginRight: 8 },
+  traitText: { color: C.textPrimary, fontSize: 13, flex: 1, lineHeight: 20 },
 });
