@@ -11,6 +11,9 @@ import {
   Animated,
   Clipboard,
   Alert,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -24,6 +27,7 @@ import {
   poolMessages,
   getMultipleForDate,
 } from "../camilleData";
+import { generateForCamille, generateAll } from "../geminiService";
 
 const { width } = Dimensions.get("window");
 
@@ -394,9 +398,9 @@ function ObjectifsTab() {
   );
 }
 
-// ─── CamilleTab ──────────────────────────────────────────────────────────────
+// ─── CamilleTab ──────────────────────────────────────────────────────────
 
-// Pool de secours (si modèle pas encore téléchargé)
+// Pool de secours (mode classique)
 const POOLS = {
   surnom:     poolSurnoms,
   compliment: poolCompliments,
@@ -404,7 +408,6 @@ const POOLS = {
   sujet:      poolSujets,
 };
 
-// Fallback aléatoire anti-répétition (utilisé sans IA)
 function getRandomFrom(pool, excludeIndexes = []) {
   let excluded = excludeIndexes;
   if (excluded.length >= pool.length) excluded = [excludeIndexes[excludeIndexes.length - 1]];
@@ -413,162 +416,114 @@ function getRandomFrom(pool, excludeIndexes = []) {
   return { item: pool[pick], index: pick };
 }
 
-// ─── Écran de téléchargement du modèle ────────────────────────────────────────
+// ─── Modal Paramètres (clé API) ───────────────────────────────────────────────
 
-function ModelDownloadScreen({ onDownloaded }) {
-  const [status, setStatus] = useState("idle"); // idle | downloading | error
-  const [progress, setProgress] = useState(0);
-  const [errorMsg, setErrorMsg] = useState("");
+function SettingsModal({ visible, onClose, apiKey, onSave }) {
+  const [input, setInput] = useState(apiKey || "");
 
-  const startDownload = async () => {
-    setStatus("downloading");
-    setProgress(0);
-    try {
-      const { downloadModel } = require("../llmService");
-      await downloadModel(({ percent }) => setProgress(percent));
-      onDownloaded();
-    } catch (e) {
-      setErrorMsg(e.message || "Erreur réseau");
-      setStatus("error");
+  useEffect(() => { setInput(apiKey || ""); }, [apiKey, visible]);
+
+  const handleSave = () => {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      Alert.alert("Clé manquante", "Entre ta clé API Gemini pour utiliser l'IA.");
+      return;
     }
+    onSave(trimmed);
+    onClose();
   };
 
   return (
-    <ScrollView contentContainerStyle={[s.scroll, { alignItems: "center", paddingTop: 32 }]}>
-      <Text style={{ fontSize: 52, marginBottom: 16 }}>🤖</Text>
-      <Text style={{ fontSize: 18, fontWeight: "700", color: "#FF6B9D", marginBottom: 8, textAlign: "center" }}>
-        Phi-3 mini – IA locale
-      </Text>
-      <Text style={{ fontSize: 12, color: "#8B949E", textAlign: "center", marginBottom: 24, lineHeight: 18 }}>
-        {"Un modèle IA tourne 100% sur ton téléphone.\nTéléchargement unique de 2.2 Go requis.\nEnsuite ça marche sans internet."}
-      </Text>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={{ flex: 1 }}>
+        <View style={settS.overlay}>
+          <View style={settS.sheet}>
+            <View style={settS.handle} />
+            <Text style={settS.title}>⚙️  Paramètres Gemini</Text>
+            <Text style={settS.subtitle}>
+              Entre ta clé API Google Gemini pour activer la génération IA.{"
+"}
+              Obtiens-la sur <Text style={settS.link}>aistudio.google.com</Text>
+            </Text>
 
-      {/* Specs */}
-      <View style={camS.specBox}>
-        {[
-          ["📦", "Modèle", "Phi-3 mini 4K Instruct"],
-          ["⚖️", "Taille", "2.2 Go (Q4_K_M)"],
-          ["🔒", "Confidentialité", "100% local, rien envoyé"],
-          ["⚡", "Vitesse", "20–45 sec / génération"],
-        ].map(([icon, label, val]) => (
-          <View key={label} style={camS.specRow}>
-            <Text style={camS.specIcon}>{icon}</Text>
-            <Text style={camS.specLabel}>{label}</Text>
-            <Text style={camS.specVal}>{val}</Text>
-          </View>
-        ))}
-      </View>
+            <Text style={settS.label}>CLÉ API GEMINI</Text>
+            <TextInput
+              style={settS.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder="AIza..."
+              placeholderTextColor="#484F58"
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry={false}
+            />
 
-      {status === "idle" && (
-        <TouchableOpacity style={camS.generateBtn} onPress={startDownload} activeOpacity={0.85}>
-          <Text style={camS.generateBtnEmoji}>⬇️</Text>
-          <Text style={camS.generateBtnText}>TÉLÉCHARGER LE MODÈLE</Text>
-        </TouchableOpacity>
-      )}
+            {apiKey ? (
+              <View style={settS.statusRow}>
+                <View style={settS.dot} />
+                <Text style={settS.statusText}>Clé configurée</Text>
+              </View>
+            ) : (
+              <View style={[settS.statusRow, { gap: 6 }]}>
+                <View style={[settS.dot, { backgroundColor: "#E3B341" }]} />
+                <Text style={[settS.statusText, { color: "#E3B341" }]}>Aucune clé — mode classique actif</Text>
+              </View>
+            )}
 
-      {status === "downloading" && (
-        <View style={{ width: "100%", marginTop: 8 }}>
-          <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 8 }}>
-            <Text style={{ color: "#FF6B9D", fontSize: 13, fontWeight: "600" }}>Téléchargement…</Text>
-            <Text style={{ color: "#FF6B9D", fontSize: 13, fontWeight: "700" }}>{progress}%</Text>
+            <TouchableOpacity style={settS.saveBtn} onPress={handleSave} activeOpacity={0.85}>
+              <Text style={settS.saveBtnText}>ENREGISTRER</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={settS.cancelBtn} onPress={onClose} activeOpacity={0.7}>
+              <Text style={settS.cancelBtnText}>Annuler</Text>
+            </TouchableOpacity>
           </View>
-          <View style={{ height: 8, backgroundColor: "#1C2128", borderRadius: 4, overflow: "hidden" }}>
-            <View style={{ height: 8, width: `${progress}%`, backgroundColor: "#FF6B9D", borderRadius: 4 }} />
-          </View>
-          <Text style={{ color: "#8B949E", fontSize: 11, marginTop: 8, textAlign: "center" }}>
-            {(progress * 2.2 / 100).toFixed(1)} Go / 2.2 Go
-          </Text>
-          <Text style={{ color: "#484F58", fontSize: 10, marginTop: 4, textAlign: "center" }}>
-            Ne quitte pas l'app pendant le téléchargement
-          </Text>
         </View>
-      )}
-
-      {status === "error" && (
-        <View style={{ width: "100%", marginTop: 8 }}>
-          <View style={[camS.tipBox, { borderColor: "#F8514940" }]}>
-            <Text style={camS.tipIcon}>❌</Text>
-            <Text style={[camS.tipText, { color: "#F85149" }]}>Erreur : {errorMsg}</Text>
-          </View>
-          <TouchableOpacity style={[camS.generateBtn, { marginTop: 12 }]} onPress={startDownload} activeOpacity={0.85}>
-            <Text style={camS.generateBtnText}>RÉESSAYER</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      <View style={[camS.tipBox, { marginTop: 24 }]}>
-        <Text style={camS.tipIcon}>💡</Text>
-        <Text style={camS.tipText}>
-          Utilise le WiFi pour télécharger. Le modèle est sauvegardé localement – ce téléchargement ne se fait qu'une seule fois.
-        </Text>
-      </View>
-    </ScrollView>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 // ─── Composant principal CamilleTab ───────────────────────────────────────────
 
 function CamilleTab() {
-  const [modelReady, setModelReady] = useState(false);      // modèle téléchargé ?
-  const [modelLoaded, setModelLoaded] = useState(false);    // modèle en RAM ?
-  const [checkingModel, setCheckingModel] = useState(true); // vérif initiale
+  const [apiKey, setApiKey] = useState("");
+  const [showSettings, setShowSettings] = useState(false);
   const [generated, setGenerated] = useState(null);
-  const [streamingState, setStreamingState] = useState({}); // { type: texte_partiel }
-  const [currentType, setCurrentType] = useState(null);     // type en cours de génération
+  const [currentType, setCurrentType] = useState(null);
   const [loading, setLoading] = useState(false);
   const [copied, setCopied] = useState(null);
-  const [useAI, setUseAI] = useState(true);
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const scaleAnim = useRef(new Animated.Value(0.95)).current;
   const lastShownRef = useRef({});
 
-  // Vérification initiale si le modèle est déjà téléchargé
+  // Charger la clé API au démarrage
   useEffect(() => {
-    (async () => {
-      try {
-        const { isModelDownloaded } = require("../llmService");
-        const downloaded = await isModelDownloaded();
-        setModelReady(downloaded);
-      } catch {
-        setModelReady(false);
-      }
-      setCheckingModel(false);
-    })();
+    AsyncStorage.getItem("gemini_api_key").then((k) => {
+      if (k) setApiKey(k);
+    });
   }, []);
 
-  // ─── Génération IA ──────────────────────────────────────────────────────────
+  const saveApiKey = async (key) => {
+    setApiKey(key);
+    await AsyncStorage.setItem("gemini_api_key", key);
+  };
 
-  const handleGenerateAI = async () => {
+  // ─── Génération Gemini ───────────────────────────────────────────────────────
+
+  const handleGenerateGemini = async () => {
     setLoading(true);
     setCopied(null);
     setGenerated(null);
-    setStreamingState({});
 
     try {
-      const { loadModel, generateAll } = require("../llmService");
-
-      if (!modelLoaded) {
-        setCurrentType("__loading__");
-        await loadModel();
-        setModelLoaded(true);
-      }
-
       const types = ["surnom", "compliment", "blague", "sujet", "message"];
       const results = {};
 
       for (const type of types) {
         setCurrentType(type);
-        setStreamingState((prev) => ({ ...prev, [type]: "" }));
-
-        const { generateForCamille } = require("../llmService");
-        let accumulated = "";
-        const text = await generateForCamille(type, (token) => {
-          accumulated += token;
-          setStreamingState((prev) => ({ ...prev, [type]: accumulated }));
-        });
-
+        const text = await generateForCamille(type, apiKey);
         results[type] = text;
-        setStreamingState((prev) => ({ ...prev, [type]: text }));
       }
 
       setCurrentType(null);
@@ -576,16 +531,21 @@ function CamilleTab() {
 
     } catch (e) {
       setCurrentType(null);
+      const isKeyError = e.message?.includes("API_KEY") || e.message?.includes("401") || e.message?.includes("403");
       Alert.alert(
-        "Erreur IA",
-        "Le modèle a rencontré un problème : " + (e.message || "erreur inconnue") +
-        "\n\nBascule en mode classique.",
-        [{ text: "OK", onPress: () => setUseAI(false) }]
+        "Erreur Gemini",
+        isKeyError
+          ? "Clé API invalide ou expirée. Vérifie tes paramètres."
+          : (e.message || "Erreur inconnue"),
+        [
+          isKeyError
+            ? { text: "Paramètres", onPress: () => setShowSettings(true) }
+            : { text: "OK" }
+        ]
       );
     }
 
     setLoading(false);
-
     fadeAnim.setValue(0);
     scaleAnim.setValue(0.95);
     Animated.parallel([
@@ -620,7 +580,6 @@ function CamilleTab() {
       history[cat.id] = [...persisted, index].slice(-5);
     }
 
-    // Message
     const msgPersisted = history["message"] || [];
     const currentMsg = lastShownRef.current["message"];
     const msgExcluded = currentMsg !== undefined
@@ -644,7 +603,7 @@ function CamilleTab() {
     ]).start();
   };
 
-  const handleGenerate = () => (useAI && modelReady) ? handleGenerateAI() : handleGenerateFallback();
+  const handleGenerate = () => apiKey ? handleGenerateGemini() : handleGenerateFallback();
 
   const handleCopy = (text, id) => {
     Clipboard.setString(text);
@@ -652,122 +611,98 @@ function CamilleTab() {
     setTimeout(() => setCopied(null), 2000);
   };
 
-  // ─── Écrans conditionnels ────────────────────────────────────────────────────
-
-  if (checkingModel) {
-    return (
-      <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
-        <Text style={{ color: "#8B949E", fontSize: 13 }}>Vérification du modèle…</Text>
-      </View>
-    );
-  }
-
-  if (!modelReady && useAI) {
-    return <ModelDownloadScreen onDownloaded={() => setModelReady(true)} />;
-  }
-
-  // ─── Labels génération en cours ─────────────────────────────────────────────
   const TYPE_LABELS = {
-    __loading__: "Chargement du modèle en mémoire…",
-    surnom:      "Génération du surnom…",
-    compliment:  "Génération du compliment…",
-    blague:      "Génération de la taquinerie…",
-    sujet:       "Génération du sujet…",
-    message:     "Génération du message…",
+    surnom:     "Génération du surnom…",
+    compliment: "Génération du compliment…",
+    blague:     "Génération de la taquinerie…",
+    sujet:      "Génération du sujet…",
+    message:    "Génération du message…",
   };
 
-  // ─── Rendu principal ────────────────────────────────────────────────────────
-
   return (
-    <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+    <>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-      {/* Header */}
-      <View style={camS.heroCard}>
-        <Text style={camS.heroEmoji}>💕</Text>
-        <View style={{ flex: 1 }}>
-          <Text style={camS.heroTitle}>Onglet Camille</Text>
-          <Text style={camS.heroSub}>
-            {useAI && modelReady
-              ? "IA locale Phi-3 mini · génération unique à chaque fois"
-              : "Mode classique · pool de suggestions"}
-          </Text>
+        {/* Header */}
+        <View style={camS.heroCard}>
+          <Text style={camS.heroEmoji}>💕</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={camS.heroTitle}>Onglet Camille</Text>
+            <Text style={camS.heroSub}>
+              {apiKey ? "Gemini AI · génération unique à chaque fois" : "Mode classique · pool de suggestions"}
+            </Text>
+          </View>
+          {/* Bouton paramètres */}
+          <TouchableOpacity style={settS.gearBtn} onPress={() => setShowSettings(true)} activeOpacity={0.7}>
+            <Text style={settS.gearIcon}>⚙️</Text>
+            {!apiKey && <View style={settS.gearDot} />}
+          </TouchableOpacity>
         </View>
-        {/* Toggle IA / classique */}
+
+        {/* Bannière si pas de clé */}
+        {!apiKey && (
+          <TouchableOpacity style={camS.noBanner} onPress={() => setShowSettings(true)} activeOpacity={0.8}>
+            <Text style={camS.noBannerText}>🔑  Configure ta clé Gemini pour activer l'IA</Text>
+            <Text style={camS.noBannerSub}>Appuie ici ou sur ⚙️ en haut à droite</Text>
+          </TouchableOpacity>
+        )}
+
+        {/* Status génération en cours */}
+        {loading && currentType && (
+          <View style={camS.statusBox}>
+            <Text style={camS.statusText}>{TYPE_LABELS[currentType] || "Génération…"}</Text>
+            <Text style={camS.statusHint}>Gemini AI · génération en cours…</Text>
+          </View>
+        )}
+
+        {/* Bouton GÉNÉRER */}
         <TouchableOpacity
-          style={[camS.modeToggle, useAI && modelReady && camS.modeToggleAI]}
-          onPress={() => setUseAI((v) => !v)}
-          activeOpacity={0.7}
+          style={[camS.generateBtn, loading && camS.generateBtnDisabled]}
+          onPress={handleGenerate}
+          activeOpacity={0.85}
           disabled={loading}
         >
-          <Text style={[camS.modeToggleText, useAI && modelReady && { color: "#FF6B9D" }]}>
-            {useAI && modelReady ? "🤖 IA" : "📋 Classique"}
+          <Text style={camS.generateBtnEmoji}>{loading ? "⏳" : (apiKey ? "✨" : "📋")}</Text>
+          <Text style={camS.generateBtnText}>
+            {loading ? "GÉNÉRATION EN COURS…" : "GÉNÉRER"}
           </Text>
         </TouchableOpacity>
-      </View>
 
-      {/* Status chargement modèle */}
-      {loading && currentType && (
-        <View style={camS.statusBox}>
-          <Text style={camS.statusText}>{TYPE_LABELS[currentType] || "Génération…"}</Text>
-          {useAI && modelReady && currentType !== "__loading__" && (
-            <Text style={camS.statusHint}>Phi-3 mini · ~30 sec/section · 100% local</Text>
-          )}
-        </View>
-      )}
+        {/* Résultats */}
+        {generated && (
+          <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
 
-      {/* Bouton GÉNÉRER */}
-      <TouchableOpacity
-        style={[camS.generateBtn, loading && camS.generateBtnDisabled]}
-        onPress={handleGenerate}
-        activeOpacity={0.85}
-        disabled={loading}
-      >
-        <Text style={camS.generateBtnEmoji}>{loading ? "⏳" : (useAI && modelReady ? "🤖" : "✨")}</Text>
-        <Text style={camS.generateBtnText}>
-          {loading ? "GÉNÉRATION EN COURS…" : "GÉNÉRER"}
-        </Text>
-      </TouchableOpacity>
+            {[
+              { id: "surnom",     cat: categoriesContenu[0] },
+              { id: "compliment", cat: categoriesContenu[1] },
+              { id: "blague",     cat: categoriesContenu[2] },
+              { id: "sujet",      cat: categoriesContenu[3] },
+            ].map(({ id, cat }) => {
+              const text = generated?.[id] || "";
+              return text ? (
+                <ResultCard
+                  key={id}
+                  cat={cat}
+                  content={text}
+                  isStreaming={false}
+                  onCopy={() => handleCopy(text, id)}
+                  copied={copied === id}
+                />
+              ) : null;
+            })}
 
-      {/* Résultats (streaming ou finaux) */}
-      {(generated || Object.keys(streamingState).length > 0) && (
-        <Animated.View style={{ opacity: fadeAnim, transform: [{ scale: scaleAnim }] }}>
-
-          {[
-            { id: "surnom",     cat: categoriesContenu[0] },
-            { id: "compliment", cat: categoriesContenu[1] },
-            { id: "blague",     cat: categoriesContenu[2] },
-            { id: "sujet",      cat: categoriesContenu[3] },
-          ].map(({ id, cat }) => {
-            const text = generated?.[id] || streamingState[id] || "";
-            const isStreaming = !generated && !!streamingState[id];
-            return text ? (
-              <ResultCard
-                key={id}
-                cat={cat}
-                content={text}
-                isStreaming={isStreaming && currentType === id}
-                onCopy={() => handleCopy(text, id)}
-                copied={copied === id}
-              />
-            ) : null;
-          })}
-
-          {/* Message complet */}
-          {(generated?.message || streamingState.message) && (() => {
-            const cat = categoriesContenu[4];
-            const text = generated?.message || streamingState.message || "";
-            const isStreaming = !generated && !!streamingState.message;
-            return (
-              <View style={[camS.resultCard, { borderColor: cat.couleur + "60" }]}>
-                <View style={camS.resultHeader}>
-                  <View style={[camS.resultBadge, { backgroundColor: cat.couleur + "20" }]}>
-                    <Text style={camS.resultBadgeEmoji}>{cat.emoji}</Text>
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={[camS.resultLabel, { color: cat.couleur }]}>{cat.label}</Text>
-                    {isStreaming && <Text style={{ color: cat.couleur + "80", fontSize: 10 }}>● en cours…</Text>}
-                  </View>
-                  {!!text && (
+            {generated?.message && (() => {
+              const cat = categoriesContenu[4];
+              const text = generated.message;
+              return (
+                <View style={[camS.resultCard, { borderColor: cat.couleur + "60" }]}>
+                  <View style={camS.resultHeader}>
+                    <View style={[camS.resultBadge, { backgroundColor: cat.couleur + "20" }]}>
+                      <Text style={camS.resultBadgeEmoji}>{cat.emoji}</Text>
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[camS.resultLabel, { color: cat.couleur }]}>{cat.label}</Text>
+                    </View>
                     <TouchableOpacity
                       style={[camS.copyBtn, copied === "message" && { backgroundColor: "#1A3D2B" }]}
                       onPress={() => handleCopy(text, "message")}
@@ -775,41 +710,46 @@ function CamilleTab() {
                     >
                       <Text style={camS.copyBtnText}>{copied === "message" ? "✓ Copié" : "📋 Copier"}</Text>
                     </TouchableOpacity>
-                  )}
+                  </View>
+                  <View style={camS.resultDivider} />
+                  <Text style={camS.resultText}>{text}</Text>
                 </View>
-                <View style={camS.resultDivider} />
-                <Text style={camS.resultText}>{text}{isStreaming ? "▌" : ""}</Text>
-              </View>
-            );
-          })()}
+              );
+            })()}
 
-          {generated && (
             <View style={camS.tipBox}>
-              <Text style={camS.tipIcon}>{useAI && modelReady ? "🤖" : "💡"}</Text>
+              <Text style={camS.tipIcon}>{apiKey ? "✨" : "💡"}</Text>
               <Text style={camS.tipText}>
-                {useAI && modelReady
-                  ? "Généré par Phi-3 mini en local sur ton téléphone. Adapte si besoin — l'IA propose, tu choisis."
-                  : "Suggestions tirées de l'analyse de vos échanges. Adapte à ta façon de parler."}
+                {apiKey
+                  ? "Généré par Gemini AI. Adapte si besoin — l'IA propose, tu choisis."
+                  : "Suggestions tirées de l'analyse de vos échanges. Configure Gemini pour des suggestions 100% uniques."}
               </Text>
             </View>
-          )}
-        </Animated.View>
-      )}
+          </Animated.View>
+        )}
 
-      {!generated && !loading && Object.keys(streamingState).length === 0 && (
-        <View style={camS.emptyState}>
-          <Text style={camS.emptyEmoji}>💌</Text>
-          <Text style={camS.emptyTitle}>Prêt à lui faire plaisir ?</Text>
-          <Text style={camS.emptyText}>
-            {useAI && modelReady
-              ? "Phi-3 mini va générer du contenu 100% original à chaque appui — surnom, compliment, taquinerie, sujet et message complet."
-              : "Appuie sur Générer pour un surnom, compliment, taquinerie, sujet et message — tirés de vos échanges."}
-          </Text>
-        </View>
-      )}
+        {!generated && !loading && (
+          <View style={camS.emptyState}>
+            <Text style={camS.emptyEmoji}>💌</Text>
+            <Text style={camS.emptyTitle}>Prêt à lui faire plaisir ?</Text>
+            <Text style={camS.emptyText}>
+              {apiKey
+                ? "Gemini va générer un contenu 100% original à chaque appui — surnom, compliment, taquinerie, sujet et message complet."
+                : "Appuie sur Générer pour des suggestions tirées de vos échanges, ou configure Gemini pour de l'IA."}
+            </Text>
+          </View>
+        )}
 
-      <View style={{ height: 40 }} />
-    </ScrollView>
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+      <SettingsModal
+        visible={showSettings}
+        onClose={() => setShowSettings(false)}
+        apiKey={apiKey}
+        onSave={saveApiKey}
+      />
+    </>
   );
 }
 
@@ -824,7 +764,6 @@ function ResultCard({ cat, content, isStreaming, onCopy, copied }) {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={[camS.resultLabel, { color: cat.couleur }]}>{cat.label}</Text>
-          {isStreaming && <Text style={{ color: cat.couleur + "80", fontSize: 10 }}>● en cours…</Text>}
         </View>
         {!!content && (
           <TouchableOpacity
@@ -837,7 +776,7 @@ function ResultCard({ cat, content, isStreaming, onCopy, copied }) {
         )}
       </View>
       <View style={camS.resultDivider} />
-      <Text style={camS.resultText}>{content}{isStreaming ? "▌" : ""}</Text>
+      <Text style={camS.resultText}>{content}</Text>
     </View>
   );
 }
@@ -1374,5 +1313,150 @@ const camS = StyleSheet.create({
     color: "#5A3040",
     fontSize: 10,
     fontFamily: "monospace",
+  },
+
+  // Bannière pas de clé
+  noBanner: {
+    backgroundColor: "#1C1A10",
+    borderWidth: 1,
+    borderColor: "#E3B34150",
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 14,
+    alignItems: "center",
+  },
+  noBannerText: {
+    color: "#E3B341",
+    fontSize: 13,
+    fontWeight: "600",
+    marginBottom: 3,
+  },
+  noBannerSub: {
+    color: "#8B7040",
+    fontSize: 11,
+  },
+});
+
+// ─── Styles Paramètres ────────────────────────────────────────────────────────
+
+const settS = StyleSheet.create({
+  gearBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: "#1C2128",
+    borderWidth: 1,
+    borderColor: "#30363D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  gearIcon: { fontSize: 18 },
+  gearDot: {
+    position: "absolute",
+    top: 5,
+    right: 5,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#E3B341",
+    borderWidth: 1,
+    borderColor: "#0D1117",
+  },
+
+  overlay: {
+    flex: 1,
+    backgroundColor: "rgba(0,0,0,0.75)",
+    justifyContent: "flex-end",
+  },
+  sheet: {
+    backgroundColor: "#161B22",
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    borderWidth: 1,
+    borderColor: "#30363D",
+    padding: 24,
+    paddingBottom: 40,
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: "#30363D",
+    borderRadius: 2,
+    alignSelf: "center",
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: "#E6EDF3",
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 13,
+    color: "#8B949E",
+    lineHeight: 20,
+    marginBottom: 20,
+  },
+  link: {
+    color: "#58A6FF",
+    textDecorationLine: "underline",
+  },
+  label: {
+    fontSize: 10,
+    fontWeight: "700",
+    letterSpacing: 1.5,
+    color: "#8B949E",
+    marginBottom: 8,
+    fontFamily: "monospace",
+  },
+  input: {
+    backgroundColor: "#0D1117",
+    borderWidth: 1,
+    borderColor: "#30363D",
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: "#E6EDF3",
+    fontSize: 14,
+    fontFamily: "monospace",
+    marginBottom: 12,
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 20,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#3DD68C",
+  },
+  statusText: {
+    color: "#3DD68C",
+    fontSize: 12,
+    fontWeight: "600",
+  },
+  saveBtn: {
+    backgroundColor: "#FF6B9D",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  saveBtnText: {
+    color: "#FFFFFF",
+    fontSize: 14,
+    fontWeight: "800",
+    letterSpacing: 2,
+  },
+  cancelBtn: {
+    paddingVertical: 10,
+    alignItems: "center",
+  },
+  cancelBtnText: {
+    color: "#8B949E",
+    fontSize: 13,
   },
 });
