@@ -14,6 +14,11 @@
     },
     "android": {
       "package": "com.lexou.app"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "21d3aa65-0c0c-461b-9239-7896df9350e9"
+      }
     }
   }
 }
