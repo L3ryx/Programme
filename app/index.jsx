@@ -7,36 +7,35 @@ import {
   StyleSheet,
   StatusBar,
   Modal,
-  Animated,
+  Dimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { phases, regles, objectifsParSemaine, todoHebdo } from "../data";
 
-// ─── helpers ────────────────────────────────────────────────────────────────
+const { width } = Dimensions.get("window");
 
-function hexToRgba(hex, alpha) {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
+// ─── Palette santé sombre ────────────────────────────────────────────────────
+const C = {
+  bg: "#0D1117",
+  surface: "#161B22",
+  surface2: "#1C2128",
+  border: "#30363D",
+  accent: "#3DD68C",       // vert santé
+  accentSoft: "#1A3D2B",
+  accentBlue: "#58A6FF",   // bleu info
+  accentBlueSoft: "#1A2A3D",
+  danger: "#F85149",
+  dangerSoft: "#3D1A1A",
+  warn: "#E3B341",
+  warnSoft: "#3D2E1A",
+  textPrimary: "#E6EDF3",
+  textSecondary: "#8B949E",
+  textMuted: "#484F58",
+  white: "#FFFFFF",
+};
 
-function getWeekKey() {
-  const now = new Date();
-  const startOfYear = new Date(now.getFullYear(), 0, 1);
-  const week = Math.ceil(((now - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
-  return `week_${now.getFullYear()}_${week}`;
-}
-
-function getDayOfWeek() {
-  return new Date().getDay(); // 0=Sun, 6=Sat
-}
-
-function getDaysSinceMonday() {
-  const day = new Date().getDay();
-  return day === 0 ? 6 : day - 1; // 0=Monday, 6=Sunday
-}
+// ─── helpers ─────────────────────────────────────────────────────────────────
 
 function getWeekNumber() {
   const now = new Date();
@@ -44,86 +43,92 @@ function getWeekNumber() {
   return Math.ceil(((now - startOfYear) / 86400000 + startOfYear.getDay() + 1) / 7);
 }
 
-// Calcule une note sur 100 selon les objectifs cochés
+function getWeekKey() {
+  const now = new Date();
+  return `week_${now.getFullYear()}_${getWeekNumber()}`;
+}
+
+function getDaysSinceMonday() {
+  const day = new Date().getDay();
+  return day === 0 ? 6 : day - 1;
+}
+
 function computeScore(checked, total) {
   if (total === 0) return 0;
   return Math.round((checked / total) * 100);
 }
 
-function getScoreLabel(score) {
-  if (score === 100) return { label: "Semaine parfaite", color: "#27AE60", emoji: "🏆" };
-  if (score >= 85) return { label: "Excellente semaine", color: "#2ECC71", emoji: "⭐" };
-  if (score >= 70) return { label: "Bonne semaine", color: "#F1C40F", emoji: "👍" };
-  if (score >= 50) return { label: "Semaine correcte", color: "#E67E22", emoji: "📈" };
-  if (score >= 30) return { label: "Semaine difficile", color: "#E74C3C", emoji: "💪" };
-  return { label: "Semaine à refaire", color: "#C0392B", emoji: "🔄" };
+function getScoreInfo(score) {
+  if (score === 100) return { label: "Semaine parfaite", color: C.accent, emoji: "🏆" };
+  if (score >= 85) return { label: "Excellente semaine", color: C.accent, emoji: "⭐" };
+  if (score >= 70) return { label: "Bonne semaine", color: C.accentBlue, emoji: "👍" };
+  if (score >= 50) return { label: "Semaine correcte", color: C.warn, emoji: "📈" };
+  if (score >= 30) return { label: "Semaine difficile", color: C.danger, emoji: "💪" };
+  return { label: "Semaine à refaire", color: C.danger, emoji: "🔄" };
 }
 
 function getScoreMessage(score, checkedIds, objectives) {
   const unchecked = objectives.filter((o) => !checkedIds.includes(o.id));
   const uncheckedTitles = unchecked.map((o) => `• ${o.titre}`).join("\n");
-
-  if (score === 100) {
-    return "Incroyable. Tu as coché chaque objectif cette semaine. C'est exactement comme ça que le changement se construit — un jour après l'autre, une semaine après l'autre. Continue.";
-  }
-  if (score >= 85) {
-    return `Très belle semaine. Il reste quelques points à travailler :\n\n${uncheckedTitles}\n\nCe sont ces petits manques qui feront la différence la semaine prochaine.`;
-  }
-  if (score >= 70) {
-    return `Bonne semaine dans l'ensemble. Voici ce qui n'a pas été fait :\n\n${uncheckedTitles}\n\nConcentre-toi sur ces points la semaine prochaine. Tu en es capable.`;
-  }
-  if (score >= 50) {
-    return `Semaine mitigée. Plus de la moitié des objectifs n'ont pas été atteints :\n\n${uncheckedTitles}\n\nC'est normal d'avoir des hauts et des bas. Mais il faut y retourner la semaine prochaine avec plus de détermination.`;
-  }
-  return `Semaine difficile. La majorité des objectifs n'ont pas été remplis :\n\n${uncheckedTitles}\n\nPas de jugement — mais du sérieux. Ce programme ne fonctionne que si tu t'y tiens vraiment. La semaine prochaine, recommence depuis le début avec cette liste.`;
+  if (score === 100) return "Incroyable. Tu as coché chaque objectif cette semaine. C'est exactement comme ça que le changement se construit — un jour après l'autre. Continue.";
+  if (score >= 85) return `Très belle semaine. Il reste quelques points :\n\n${uncheckedTitles}\n\nCe sont ces petits manques qui feront la différence la semaine prochaine.`;
+  if (score >= 70) return `Bonne semaine dans l'ensemble. Ce qui n'a pas été fait :\n\n${uncheckedTitles}\n\nConcentre-toi sur ces points la semaine prochaine.`;
+  if (score >= 50) return `Semaine mitigée. Plus de la moitié des objectifs n'ont pas été atteints :\n\n${uncheckedTitles}\n\nReviens avec plus de détermination la semaine prochaine.`;
+  return `Semaine difficile. La majorité des objectifs n'ont pas été remplis :\n\n${uncheckedTitles}\n\nPas de jugement — mais du sérieux. Recommence depuis le début la semaine prochaine.`;
 }
 
-// ─── PhaseCard ──────────────────────────────────────────────────────────────
+// ─── PhaseCard ───────────────────────────────────────────────────────────────
 
 function PhaseCard({ phase }) {
   const [expanded, setExpanded] = useState(false);
+  const colors = {
+    "#C0392B": C.danger,
+    "#E67E22": C.warn,
+    "#F1C40F": C.warn,
+    "#27AE60": C.accent,
+    "#2980B9": C.accentBlue,
+  };
+  const col = colors[phase.couleur] || C.accent;
 
   return (
-    <View style={styles.phaseWrapper}>
-      <TouchableOpacity
-        onPress={() => setExpanded(!expanded)}
-        style={[
-          styles.phaseHeader,
-          expanded && {
-            backgroundColor: hexToRgba(phase.couleur, 0.12),
-            borderColor: hexToRgba(phase.couleur, 0.3),
-            borderBottomLeftRadius: 0,
-            borderBottomRightRadius: 0,
-          },
-        ]}
-        activeOpacity={0.8}
-      >
-        <Text style={[styles.phaseNumero, { color: phase.couleur }]}>{phase.numero}</Text>
-        <Text style={styles.phaseIcon}>{phase.icon}</Text>
-        <View style={styles.phaseTitleBlock}>
-          <Text style={styles.phaseTitre}>{phase.titre}</Text>
-          <Text style={styles.phaseDuree}>{phase.duree}</Text>
+    <View style={s.card}>
+      <TouchableOpacity onPress={() => setExpanded(!expanded)} style={s.phaseHeader} activeOpacity={0.8}>
+        <View style={[s.phaseNumBadge, { backgroundColor: col + "22", borderColor: col + "55" }]}>
+          <Text style={[s.phaseNum, { color: col }]}>{phase.numero}</Text>
         </View>
-        <Text style={[styles.phaseArrow, expanded && styles.phaseArrowUp]}>↓</Text>
+        <Text style={s.phaseIcon}>{phase.icon}</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={s.phaseTitre}>{phase.titre}</Text>
+          <Text style={s.phaseDuree}>{phase.duree}</Text>
+        </View>
+        <View style={[s.expandIcon, expanded && { backgroundColor: col + "22" }]}>
+          <Text style={[s.expandArrow, { color: col }]}>{expanded ? "−" : "+"}</Text>
+        </View>
       </TouchableOpacity>
 
       {expanded && (
-        <View style={[styles.phaseContent, { borderColor: hexToRgba(phase.couleur, 0.2) }]}>
-          <Text style={styles.phaseDescription}>{phase.description}</Text>
-          <Text style={[styles.sectionLabel, { color: phase.couleur }]}>À FAIRE</Text>
+        <View style={[s.phaseBody, { borderTopColor: C.border }]}>
+          <Text style={s.phaseDesc}>{phase.description}</Text>
+
+          <View style={s.sectionHeader}>
+            <View style={[s.sectionDot, { backgroundColor: col }]} />
+            <Text style={[s.sectionTitle, { color: col }]}>À FAIRE</Text>
+          </View>
           {phase.actions.map((action, j) => (
-            <View key={j} style={[styles.actionCard, { borderLeftColor: phase.couleur }]}>
-              <Text style={styles.actionTitre}>{action.titre}</Text>
-              <Text style={styles.actionDetail}>{action.detail}</Text>
+            <View key={j} style={[s.actionCard, { borderLeftColor: col }]}>
+              <Text style={s.actionTitre}>{action.titre}</Text>
+              <Text style={s.actionDetail}>{action.detail}</Text>
             </View>
           ))}
-          <Text style={[styles.sectionLabel, { color: "#C0392B", marginTop: 20 }]}>
-            ERREURS À NE PLUS COMMETTRE
-          </Text>
+
+          <View style={[s.sectionHeader, { marginTop: 20 }]}>
+            <View style={[s.sectionDot, { backgroundColor: C.danger }]} />
+            <Text style={[s.sectionTitle, { color: C.danger }]}>ERREURS À ÉVITER</Text>
+          </View>
           {phase.erreurs.map((erreur, j) => (
-            <View key={j} style={styles.erreurRow}>
-              <Text style={styles.erreurCross}>✕</Text>
-              <Text style={styles.erreurText}>{erreur}</Text>
+            <View key={j} style={s.erreurRow}>
+              <View style={s.erreurDot} />
+              <Text style={s.erreurText}>{erreur}</Text>
             </View>
           ))}
         </View>
@@ -132,261 +137,223 @@ function PhaseCard({ phase }) {
   );
 }
 
-// ─── ProgrammeTab ────────────────────────────────────────────────────────────
+// ─── ProgrammeTab ─────────────────────────────────────────────────────────────
 
 function ProgrammeTab() {
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.introBox}>
-        <Text style={styles.introText}>
-          Ce programme n'est pas une liste de cases à cocher. C'est un chemin. Les phases se
-          superposent, certaines durent plus longtemps que prévu. L'important n'est pas la vitesse
-          — c'est la direction.
+    <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <View style={s.infoBox}>
+        <Text style={s.infoBoxIcon}>📋</Text>
+        <Text style={s.infoBoxText}>
+          Ce programme n'est pas une liste de cases à cocher. C'est un chemin. Les phases se superposent — l'important n'est pas la vitesse, c'est la direction.
         </Text>
       </View>
-      {phases.map((phase) => (
-        <PhaseCard key={phase.id} phase={phase} />
-      ))}
-      <View style={styles.finalBox}>
-        <Text style={styles.finalEmoji}>🌱</Text>
-        <Text style={styles.finalText}>
-          Camille ne reviendra pas parce qu'Alex aura dit les bons mots. Elle reviendra — peut-être
-          — parce qu'il sera devenu quelqu'un qui n'a plus besoin d'elle pour exister. C'est la
-          seule chose qui puisse vraiment changer la donne.
+      {phases.map((phase) => <PhaseCard key={phase.id} phase={phase} />)}
+      <View style={[s.infoBox, { marginTop: 8 }]}>
+        <Text style={s.infoBoxIcon}>🌱</Text>
+        <Text style={s.infoBoxText}>
+          Camille ne reviendra pas parce qu'Alex aura dit les bons mots. Elle reviendra — peut-être — parce qu'il sera devenu quelqu'un qui n'a plus besoin d'elle pour exister.
         </Text>
       </View>
     </ScrollView>
   );
 }
 
-// ─── ReglesTab ───────────────────────────────────────────────────────────────
+// ─── ReglesTab ────────────────────────────────────────────────────────────────
 
 function ReglesTab() {
+  const interdits = regles.filter((r) => r.emoji === "🚫");
+  const positifs = regles.filter((r) => r.emoji === "✅");
+
   return (
-    <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-      <View style={styles.introBox}>
-        <Text style={styles.introText}>
-          Ces règles ne sont pas des contraintes imposées de l'extérieur. Ce sont les limites
-          qu'Alex doit s'imposer à lui-même — parce qu'il comprend désormais ce qu'elles
-          protègent.
+    <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <View style={s.infoBox}>
+        <Text style={s.infoBoxIcon}>🛡️</Text>
+        <Text style={s.infoBoxText}>
+          Ces règles sont les limites qu'Alex s'impose à lui-même — parce qu'il comprend désormais ce qu'elles protègent.
         </Text>
       </View>
-      {regles.map((regle, i) => {
-        const isNon = regle.emoji === "🚫";
-        return (
-          <View
-            key={i}
-            style={[
-              styles.regleCard,
-              {
-                backgroundColor: isNon ? "rgba(192,57,43,0.06)" : "rgba(39,174,96,0.06)",
-                borderColor: isNon ? "rgba(192,57,43,0.2)" : "rgba(39,174,96,0.2)",
-              },
-            ]}
-          >
-            <Text style={styles.regleEmoji}>{regle.emoji}</Text>
-            <Text style={[styles.regleTexte, { color: isNon ? "#c0a0a0" : "#a0c0a8" }]}>
-              {regle.texte}
-            </Text>
+
+      <Text style={s.groupLabel}>INTERDITS ABSOLUS</Text>
+      {interdits.map((r, i) => (
+        <View key={i} style={[s.regleCard, { backgroundColor: C.dangerSoft, borderColor: C.danger + "40" }]}>
+          <View style={[s.regleBadge, { backgroundColor: C.danger + "30" }]}>
+            <Text style={s.regleBadgeText}>✕</Text>
           </View>
-        );
-      })}
-      <View style={styles.regleMasterBox}>
-        <Text style={styles.regleMasterLabel}>LA RÈGLE AU-DESSUS DE TOUTES</Text>
-        <Text style={styles.regleMasterQuote}>
-          "Avant d'envoyer un message, se poser une seule question : est-ce que ce message nourrit
-          la relation ou est-ce qu'il nourrit mon angoisse ?"
+          <Text style={[s.regleTexte, { color: "#E89090" }]}>{r.texte}</Text>
+        </View>
+      ))}
+
+      <Text style={[s.groupLabel, { marginTop: 24 }]}>ENGAGEMENTS POSITIFS</Text>
+      {positifs.map((r, i) => (
+        <View key={i} style={[s.regleCard, { backgroundColor: C.accentSoft, borderColor: C.accent + "40" }]}>
+          <View style={[s.regleBadge, { backgroundColor: C.accent + "30" }]}>
+            <Text style={[s.regleBadgeText, { color: C.accent }]}>✓</Text>
+          </View>
+          <Text style={[s.regleTexte, { color: "#90C8A0" }]}>{r.texte}</Text>
+        </View>
+      ))}
+
+      <View style={[s.masterBox]}>
+        <Text style={s.masterLabel}>⚡ LA RÈGLE SUPRÊME</Text>
+        <Text style={s.masterQuote}>
+          "Avant d'envoyer un message, se poser une seule question : est-ce que ce message nourrit la relation ou est-ce qu'il nourrit mon angoisse ?"
         </Text>
-        <Text style={styles.regleMasterSub}>
-          Si la réponse est "mon angoisse" — poser le téléphone. Toujours.
-        </Text>
+        <View style={[s.masterFooter]}>
+          <Text style={s.masterSub}>Si c'est l'angoisse → poser le téléphone. Toujours.</Text>
+        </View>
       </View>
     </ScrollView>
   );
 }
 
-// ─── ObjectifsTab ────────────────────────────────────────────────────────────
+// ─── ObjectifsTab ─────────────────────────────────────────────────────────────
 
 function ObjectifsTab() {
   const [checkedIds, setCheckedIds] = useState([]);
-  const [weekKey, setWeekKey] = useState(getWeekKey());
   const [weekValidated, setWeekValidated] = useState(false);
-  const [showModal, setShowModal] = useState(false);
   const [score, setScore] = useState(0);
+  const [showModal, setShowModal] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // Choisir la liste d'objectifs selon le numéro de semaine (cycle de 4)
+  const weekKey = getWeekKey();
   const weekIndex = (getWeekNumber() - 1) % objectifsParSemaine.length;
-  const currentObjectives = objectifsParSemaine[weekIndex];
-  const daysSinceMonday = getDaysSinceMonday(); // 0=lundi, 6=dimanche
-  const isDay7 = daysSinceMonday === 6; // dimanche = jour 7
+  const objectives = objectifsParSemaine[weekIndex];
+  const daysSinceMonday = getDaysSinceMonday();
+  const isDay7 = daysSinceMonday === 6;
+  const progressPct = computeScore(checkedIds.length, objectives.length);
+  const scoreInfo = getScoreInfo(score);
 
-  // Charger l'état depuis AsyncStorage
   useEffect(() => {
     (async () => {
       try {
         const stored = await AsyncStorage.getItem(`objectives_${weekKey}`);
         if (stored) {
-          const parsed = JSON.parse(stored);
-          setCheckedIds(parsed.checkedIds || []);
-          setWeekValidated(parsed.validated || false);
-          if (parsed.validated) {
-            setScore(parsed.score || 0);
-          }
+          const p = JSON.parse(stored);
+          setCheckedIds(p.checkedIds || []);
+          setWeekValidated(p.validated || false);
+          if (p.validated) setScore(p.score || 0);
         }
-      } catch (e) {
-        console.error(e);
-      }
+      } catch (e) {}
       setLoading(false);
     })();
   }, [weekKey]);
 
-  // Sauvegarder
-  const save = useCallback(
-    async (ids, validated, sc) => {
-      try {
-        await AsyncStorage.setItem(
-          `objectives_${weekKey}`,
-          JSON.stringify({ checkedIds: ids, validated, score: sc })
-        );
-      } catch (e) {
-        console.error(e);
-      }
-    },
-    [weekKey]
-  );
+  const save = useCallback(async (ids, validated, sc) => {
+    try {
+      await AsyncStorage.setItem(`objectives_${weekKey}`, JSON.stringify({ checkedIds: ids, validated, score: sc }));
+    } catch (e) {}
+  }, [weekKey]);
 
   const toggleCheck = (id) => {
-    if (weekValidated) return; // semaine validée, plus modifiable
-    const already = checkedIds.includes(id);
-    if (already) return; // ne peut pas décocher
+    if (weekValidated || checkedIds.includes(id)) return;
     const newIds = [...checkedIds, id];
     setCheckedIds(newIds);
     save(newIds, false, 0);
   };
 
   const validateWeek = () => {
-    const sc = computeScore(checkedIds.length, currentObjectives.length);
+    const sc = computeScore(checkedIds.length, objectives.length);
     setScore(sc);
     setWeekValidated(true);
     save(checkedIds, true, sc);
     setShowModal(true);
   };
 
-  const scoreInfo = getScoreLabel(score);
-
-  if (loading) {
-    return (
-      <View style={[styles.scrollContent, { flex: 1, alignItems: "center", justifyContent: "center" }]}>
-        <Text style={{ color: "#555" }}>Chargement…</Text>
-      </View>
-    );
-  }
+  if (loading) return <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}><Text style={{ color: C.textMuted }}>Chargement…</Text></View>;
 
   return (
     <>
-      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Semaine info */}
-        <View style={styles.weekInfoBox}>
-          <View style={styles.weekInfoLeft}>
-            <Text style={styles.weekInfoLabel}>SEMAINE EN COURS</Text>
-            <Text style={styles.weekInfoSub}>
-              Jour {daysSinceMonday + 1} / 7 · {checkedIds.length}/{currentObjectives.length} objectifs
-            </Text>
-          </View>
-          {weekValidated && (
-            <View style={[styles.weekBadge, { backgroundColor: hexToRgba(scoreInfo.color, 0.15), borderColor: hexToRgba(scoreInfo.color, 0.4) }]}>
-              <Text style={[styles.weekBadgeText, { color: scoreInfo.color }]}>
-                {scoreInfo.emoji} {score}%
-              </Text>
-            </View>
-          )}
-        </View>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        {/* Barre de progression */}
-        <View style={styles.progressBarBg}>
-          <View
-            style={[
-              styles.progressBarFill,
-              {
-                width: `${computeScore(checkedIds.length, currentObjectives.length)}%`,
-                backgroundColor: weekValidated ? scoreInfo.color : "#8B7355",
-              },
-            ]}
-          />
+        {/* Carte semaine */}
+        <View style={s.weekCard}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <View>
+              <Text style={s.weekLabel}>SEMAINE EN COURS</Text>
+              <Text style={s.weekDay}>Jour {daysSinceMonday + 1} sur 7</Text>
+            </View>
+            {weekValidated
+              ? <View style={[s.scorePill, { backgroundColor: scoreInfo.color + "25", borderColor: scoreInfo.color + "60" }]}>
+                  <Text style={[s.scorePillText, { color: scoreInfo.color }]}>{scoreInfo.emoji} {score}%</Text>
+                </View>
+              : <View style={[s.scorePill, { backgroundColor: C.accentBlue + "20", borderColor: C.accentBlue + "50" }]}>
+                  <Text style={[s.scorePillText, { color: C.accentBlue }]}>{checkedIds.length}/{objectives.length}</Text>
+                </View>
+            }
+          </View>
+
+          {/* Barre */}
+          <View style={s.progressBg}>
+            <View style={[s.progressFill, {
+              width: `${progressPct}%`,
+              backgroundColor: weekValidated ? scoreInfo.color : C.accent,
+            }]} />
+          </View>
+          <Text style={s.progressLabel}>{progressPct}% accompli</Text>
         </View>
 
         {/* Objectifs */}
-        <Text style={styles.sectionLabel2}>OBJECTIFS DE LA SEMAINE</Text>
-        {currentObjectives.map((obj) => {
-          const isChecked = checkedIds.includes(obj.id);
+        <Text style={s.groupLabel}>OBJECTIFS DE LA SEMAINE</Text>
+        {objectives.map((obj) => {
+          const checked = checkedIds.includes(obj.id);
+          const missed = weekValidated && !checked;
           return (
             <TouchableOpacity
               key={obj.id}
               onPress={() => toggleCheck(obj.id)}
-              activeOpacity={weekValidated ? 1 : 0.75}
+              activeOpacity={weekValidated ? 1 : 0.7}
               style={[
-                styles.objectifRow,
-                isChecked && styles.objectifRowChecked,
-                weekValidated && !isChecked && styles.objectifRowMissed,
+                s.objRow,
+                checked && s.objRowChecked,
+                missed && s.objRowMissed,
               ]}
             >
-              <View style={[styles.checkBox, isChecked && styles.checkBoxChecked]}>
-                {isChecked && <Text style={styles.checkMark}>✓</Text>}
+              <View style={[s.checkbox, checked && s.checkboxChecked, missed && s.checkboxMissed]}>
+                {checked && <Text style={s.checkmark}>✓</Text>}
+                {missed && <Text style={[s.checkmark, { color: C.danger }]}>✕</Text>}
               </View>
-              <Text style={[styles.objectifText, isChecked && styles.objectifTextChecked]}>
+              <Text style={[s.objText, checked && s.objTextChecked, missed && s.objTextMissed]}>
                 {obj.titre}
               </Text>
-              {weekValidated && !isChecked && (
-                <Text style={styles.missedMark}>✕</Text>
-              )}
             </TouchableOpacity>
           );
         })}
 
         {/* Bouton validation */}
-        {!weekValidated && (
-          <View style={styles.validateSection}>
-            {isDay7 ? (
-              <TouchableOpacity style={styles.validateBtn} onPress={validateWeek} activeOpacity={0.8}>
-                <Text style={styles.validateBtnText}>✦ VALIDER MA SEMAINE</Text>
-              </TouchableOpacity>
-            ) : (
-              <View style={styles.validateDisabledBtn}>
-                <Text style={styles.validateDisabledText}>
-                  Validation disponible le dimanche (jour 7)
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+        <View style={{ marginTop: 20, marginBottom: 8 }}>
+          {weekValidated ? (
+            <TouchableOpacity style={s.bilanBtn} onPress={() => setShowModal(true)} activeOpacity={0.8}>
+              <Text style={s.bilanBtnText}>📊  Voir le bilan de semaine</Text>
+            </TouchableOpacity>
+          ) : isDay7 ? (
+            <TouchableOpacity style={s.validateBtn} onPress={validateWeek} activeOpacity={0.8}>
+              <Text style={s.validateBtnText}>✦  VALIDER MA SEMAINE</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={s.validateWaiting}>
+              <Text style={s.validateWaitingText}>🔒  Validation disponible le dimanche (jour 7)</Text>
+            </View>
+          )}
+        </View>
 
-        {weekValidated && (
-          <TouchableOpacity style={styles.recapBtn} onPress={() => setShowModal(true)} activeOpacity={0.8}>
-            <Text style={styles.recapBtnText}>📊 Voir le bilan de semaine</Text>
-          </TouchableOpacity>
-        )}
+        {/* Divider */}
+        <View style={s.divider} />
 
-        {/* Séparateur */}
-        <View style={styles.divider} />
-
-        {/* À FAIRE cette semaine */}
-        <Text style={styles.sectionLabel2}>À FAIRE CETTE SEMAINE</Text>
+        {/* À faire */}
+        <Text style={s.groupLabel}>À FAIRE CETTE SEMAINE</Text>
         {todoHebdo.faire.map((item, i) => (
-          <View key={i} style={styles.todoRow}>
-            <Text style={styles.todoIcon}>✅</Text>
-            <Text style={styles.todoText}>{item}</Text>
+          <View key={i} style={[s.todoRow, { borderLeftColor: C.accent }]}>
+            <Text style={s.todoCheck}>✓</Text>
+            <Text style={s.todoText}>{item}</Text>
           </View>
         ))}
 
-        {/* NE PAS FAIRE */}
-        <Text style={[styles.sectionLabel2, { color: "#C0392B", marginTop: 24 }]}>
-          À NE PAS FAIRE
-        </Text>
+        <Text style={[s.groupLabel, { marginTop: 24, color: C.danger }]}>À NE PAS FAIRE</Text>
         {todoHebdo.nepasiFaire.map((item, i) => (
-          <View key={i} style={styles.todoRow}>
-            <Text style={styles.todoIcon}>🚫</Text>
-            <Text style={[styles.todoText, { color: "#c0a0a0" }]}>{item}</Text>
+          <View key={i} style={[s.todoRow, { borderLeftColor: C.danger }]}>
+            <Text style={[s.todoCheck, { color: C.danger }]}>✕</Text>
+            <Text style={[s.todoText, { color: "#C09090" }]}>{item}</Text>
           </View>
         ))}
 
@@ -395,20 +362,18 @@ function ObjectifsTab() {
 
       {/* Modal bilan */}
       <Modal visible={showModal} transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalBox}>
-            <Text style={[styles.modalScore, { color: scoreInfo.color }]}>
-              {scoreInfo.emoji} {score}%
-            </Text>
-            <Text style={[styles.modalLabel, { color: scoreInfo.color }]}>{scoreInfo.label}</Text>
-            <View style={styles.modalDivider} />
-            <ScrollView style={{ maxHeight: 300 }}>
-              <Text style={styles.modalMessage}>
-                {getScoreMessage(score, checkedIds, currentObjectives)}
-              </Text>
+        <View style={s.overlay}>
+          <View style={s.modal}>
+            <View style={[s.modalTop, { backgroundColor: scoreInfo.color + "18" }]}>
+              <Text style={s.modalEmoji}>{scoreInfo.emoji}</Text>
+              <Text style={[s.modalScore, { color: scoreInfo.color }]}>{score}%</Text>
+              <Text style={[s.modalLabel, { color: scoreInfo.color }]}>{scoreInfo.label}</Text>
+            </View>
+            <ScrollView style={{ maxHeight: 280, padding: 20 }}>
+              <Text style={s.modalMsg}>{getScoreMessage(score, checkedIds, objectives)}</Text>
             </ScrollView>
-            <TouchableOpacity style={styles.modalClose} onPress={() => setShowModal(false)}>
-              <Text style={styles.modalCloseText}>Fermer</Text>
+            <TouchableOpacity style={s.modalClose} onPress={() => setShowModal(false)} activeOpacity={0.8}>
+              <Text style={s.modalCloseText}>Fermer</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -417,338 +382,311 @@ function ObjectifsTab() {
   );
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
+
+const TABS = [
+  { key: "objectifs", label: "Objectifs", icon: "🎯" },
+  { key: "programme", label: "Programme", icon: "📋" },
+  { key: "regles",    label: "Règles d'or", icon: "🛡️" },
+];
 
 export default function Index() {
   const [onglet, setOnglet] = useState("objectifs");
 
-  const tabs = [
-    { key: "objectifs", label: "OBJECTIFS" },
-    { key: "programme", label: "LES 5 PHASES" },
-    { key: "regles", label: "RÈGLES D'OR" },
-  ];
-
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#0a0a0f" />
+    <SafeAreaView style={s.root}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
 
-      <View style={styles.header}>
-        <Text style={styles.headerSurtitle}>PROGRAMME DE RECONSTRUCTION PERSONNELLE</Text>
-        <Text style={styles.headerTitle}>Pour Alex</Text>
-        <Text style={styles.headerSub}>5 phases · 6 mois · Un seul objectif</Text>
+      {/* Header */}
+      <View style={s.header}>
+        <View>
+          <Text style={s.headerEyebrow}>RECONSTRUCTION PERSONNELLE</Text>
+          <Text style={s.headerTitle}>Programme Alex</Text>
+        </View>
+        <View style={s.headerBadge}>
+          <Text style={s.headerBadgeText}>6 mois</Text>
+        </View>
       </View>
 
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsScroll} contentContainerStyle={styles.tabs}>
-        {tabs.map((tab) => (
-          <TouchableOpacity
-            key={tab.key}
-            onPress={() => setOnglet(tab.key)}
-            style={[styles.tab, onglet === tab.key && styles.tabActive]}
-          >
-            <Text style={[styles.tabText, onglet === tab.key && styles.tabTextActive]}>
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Tab bar visible en bas */}
+      <View style={s.tabBar}>
+        {TABS.map((tab) => {
+          const active = onglet === tab.key;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              onPress={() => setOnglet(tab.key)}
+              style={[s.tabItem, active && s.tabItemActive]}
+              activeOpacity={0.7}
+            >
+              <Text style={s.tabIcon}>{tab.icon}</Text>
+              <Text style={[s.tabLabel, active && s.tabLabelActive]}>{tab.label}</Text>
+              {active && <View style={s.tabIndicator} />}
+            </TouchableOpacity>
+          );
+        })}
+      </View>
 
-      {onglet === "programme" && <ProgrammeTab />}
-      {onglet === "regles" && <ReglesTab />}
-      {onglet === "objectifs" && <ObjectifsTab />}
+      {/* Contenu */}
+      <View style={{ flex: 1 }}>
+        {onglet === "objectifs" && <ObjectifsTab />}
+        {onglet === "programme" && <ProgrammeTab />}
+        {onglet === "regles" && <ReglesTab />}
+      </View>
     </SafeAreaView>
   );
 }
 
-// ─── Styles ──────────────────────────────────────────────────────────────────
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0a0a0f" },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: C.bg },
 
   header: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.08)",
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 20,
-    backgroundColor: "rgba(255,255,255,0.02)",
-  },
-  headerSurtitle: {
-    fontSize: 9,
-    letterSpacing: 3,
-    color: "#888",
-    fontFamily: "monospace",
-    marginBottom: 8,
-  },
-  headerTitle: { fontSize: 32, fontWeight: "300", color: "#f0ebe0", marginBottom: 4 },
-  headerSub: { fontSize: 13, color: "#888", fontStyle: "italic" },
-
-  tabsScroll: {
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
-    backgroundColor: "rgba(255,255,255,0.01)",
-    flexGrow: 0,
-  },
-  tabs: { flexDirection: "row" },
-  tab: {
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  tabActive: { borderBottomColor: "#e8e0d0" },
-  tabText: { fontSize: 10, letterSpacing: 2, color: "#555", fontFamily: "monospace" },
-  tabTextActive: { color: "#e8e0d0" },
-
-  scrollContent: { padding: 16, paddingBottom: 40 },
-
-  introBox: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 20,
-  },
-  introText: { color: "#aaa", fontSize: 14, lineHeight: 22, fontStyle: "italic" },
-
-  // Phase card
-  phaseWrapper: { marginBottom: 12 },
-  phaseHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-    borderRadius: 12,
-    padding: 16,
-    gap: 12,
-  },
-  phaseNumero: { fontFamily: "monospace", fontSize: 10, letterSpacing: 2, minWidth: 22 },
-  phaseIcon: { fontSize: 20 },
-  phaseTitleBlock: { flex: 1 },
-  phaseTitre: { color: "#e8e0d0", fontSize: 16, fontWeight: "600", marginBottom: 2 },
-  phaseDuree: { color: "#555", fontSize: 11, fontFamily: "monospace", letterSpacing: 1 },
-  phaseArrow: { color: "#555", fontSize: 16 },
-  phaseArrowUp: { transform: [{ rotate: "180deg" }] },
-  phaseContent: {
-    backgroundColor: "rgba(255,255,255,0.02)",
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    padding: 20,
-  },
-  phaseDescription: {
-    color: "#aaa",
-    fontSize: 14,
-    fontStyle: "italic",
-    lineHeight: 22,
-    marginBottom: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: "rgba(255,255,255,0.06)",
-  },
-  sectionLabel: { fontSize: 9, letterSpacing: 3, fontFamily: "monospace", marginBottom: 12 },
-  actionCard: {
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderLeftWidth: 3,
-    borderTopRightRadius: 8,
-    borderBottomRightRadius: 8,
-    padding: 14,
-    marginBottom: 10,
-  },
-  actionTitre: { color: "#e8e0d0", fontWeight: "600", fontSize: 14, marginBottom: 6 },
-  actionDetail: { color: "#888", fontSize: 13, lineHeight: 20 },
-  erreurRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 8 },
-  erreurCross: { color: "#C0392B", fontSize: 13, marginTop: 1 },
-  erreurText: { color: "#777", fontSize: 13, lineHeight: 20, flex: 1 },
-
-  finalBox: {
-    marginTop: 24,
-    padding: 24,
-    backgroundColor: "rgba(255,255,255,0.02)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
-    alignItems: "center",
-  },
-  finalEmoji: { fontSize: 28, marginBottom: 14 },
-  finalText: { color: "#aaa", fontSize: 14, lineHeight: 24, fontStyle: "italic", textAlign: "center" },
-
-  // Règles
-  regleCard: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    gap: 14,
-    padding: 14,
-    borderWidth: 1,
-    borderRadius: 10,
-    marginBottom: 8,
-  },
-  regleEmoji: { fontSize: 18, marginTop: 1 },
-  regleTexte: { fontSize: 14, lineHeight: 22, flex: 1 },
-  regleMasterBox: {
-    marginTop: 32,
-    padding: 24,
-    backgroundColor: "rgba(255,255,255,0.02)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: 12,
-  },
-  regleMasterLabel: { fontSize: 9, letterSpacing: 3, color: "#555", fontFamily: "monospace", marginBottom: 14 },
-  regleMasterQuote: { color: "#c8c0b0", fontSize: 15, lineHeight: 26, fontStyle: "italic" },
-  regleMasterSub: { color: "#555", fontSize: 13, marginTop: 12, lineHeight: 20 },
-
-  // Objectifs
-  weekInfoBox: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: C.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
   },
-  weekInfoLeft: {},
-  weekInfoLabel: { fontSize: 9, letterSpacing: 3, color: "#888", fontFamily: "monospace", marginBottom: 4 },
-  weekInfoSub: { color: "#c8c0b0", fontSize: 13 },
-  weekBadge: {
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  weekBadgeText: { fontSize: 14, fontWeight: "700" },
+  headerEyebrow: { fontSize: 9, letterSpacing: 2.5, color: C.textMuted, fontFamily: "monospace", marginBottom: 4 },
+  headerTitle: { fontSize: 22, fontWeight: "700", color: C.textPrimary },
+  headerBadge: { backgroundColor: C.accentSoft, borderWidth: 1, borderColor: C.accent + "50", borderRadius: 20, paddingHorizontal: 12, paddingVertical: 5 },
+  headerBadgeText: { color: C.accent, fontSize: 12, fontWeight: "600" },
 
-  progressBarBg: {
-    height: 4,
-    backgroundColor: "rgba(255,255,255,0.07)",
-    borderRadius: 2,
-    marginBottom: 24,
+  // Tab bar en haut, bien visible
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: C.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  tabItem: {
+    flex: 1,
+    alignItems: "center",
+    paddingVertical: 10,
+    position: "relative",
+  },
+  tabItemActive: {
+    backgroundColor: C.surface2,
+  },
+  tabIcon: { fontSize: 18, marginBottom: 3 },
+  tabLabel: { fontSize: 10, color: C.textMuted, fontWeight: "500", letterSpacing: 0.5 },
+  tabLabelActive: { color: C.accent, fontWeight: "700" },
+  tabIndicator: {
+    position: "absolute",
+    bottom: 0,
+    left: 12,
+    right: 12,
+    height: 2,
+    backgroundColor: C.accent,
+    borderRadius: 1,
+  },
+
+  scroll: { padding: 16, paddingBottom: 40 },
+
+  card: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    marginBottom: 10,
     overflow: "hidden",
   },
-  progressBarFill: { height: 4, borderRadius: 2 },
-
-  sectionLabel2: {
-    fontSize: 9,
-    letterSpacing: 3,
-    color: "#8B7355",
-    fontFamily: "monospace",
-    marginBottom: 12,
-  },
-
-  objectifRow: {
+  phaseHeader: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "rgba(255,255,255,0.03)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.07)",
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 8,
+    padding: 16,
     gap: 12,
   },
-  objectifRowChecked: {
-    backgroundColor: "rgba(39,174,96,0.07)",
-    borderColor: "rgba(39,174,96,0.25)",
+  phaseNumBadge: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  phaseNum: { fontSize: 11, fontWeight: "700", fontFamily: "monospace" },
+  phaseIcon: { fontSize: 22 },
+  phaseTitre: { color: C.textPrimary, fontSize: 15, fontWeight: "600", marginBottom: 2 },
+  phaseDuree: { color: C.textMuted, fontSize: 11, fontFamily: "monospace" },
+  expandIcon: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: C.border, alignItems: "center", justifyContent: "center" },
+  expandArrow: { fontSize: 18, fontWeight: "300", color: C.textSecondary },
+
+  phaseBody: { borderTopWidth: 1, padding: 16 },
+  phaseDesc: { color: C.textSecondary, fontSize: 13, fontStyle: "italic", lineHeight: 20, marginBottom: 18 },
+
+  sectionHeader: { flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 10 },
+  sectionDot: { width: 6, height: 6, borderRadius: 3 },
+  sectionTitle: { fontSize: 9, letterSpacing: 2.5, fontFamily: "monospace", fontWeight: "700" },
+
+  actionCard: {
+    backgroundColor: C.surface2,
+    borderLeftWidth: 3,
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
   },
-  objectifRowMissed: {
-    backgroundColor: "rgba(192,57,43,0.05)",
-    borderColor: "rgba(192,57,43,0.15)",
+  actionTitre: { color: C.textPrimary, fontWeight: "600", fontSize: 13, marginBottom: 5 },
+  actionDetail: { color: C.textSecondary, fontSize: 12, lineHeight: 18 },
+
+  erreurRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, marginBottom: 7 },
+  erreurDot: { width: 5, height: 5, borderRadius: 2.5, backgroundColor: C.danger, marginTop: 7 },
+  erreurText: { color: C.textSecondary, fontSize: 13, lineHeight: 19, flex: 1 },
+
+  infoBox: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 12,
+    flexDirection: "row",
+    gap: 12,
+    alignItems: "flex-start",
   },
-  checkBox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
+  infoBoxIcon: { fontSize: 20, marginTop: 1 },
+  infoBoxText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1, fontStyle: "italic" },
+
+  groupLabel: {
+    fontSize: 10,
+    letterSpacing: 2.5,
+    color: C.accent,
+    fontFamily: "monospace",
+    fontWeight: "700",
+    marginBottom: 10,
+    marginTop: 4,
+  },
+
+  regleCard: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginBottom: 7,
+  },
+  regleBadge: { width: 28, height: 28, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+  regleBadgeText: { color: C.danger, fontSize: 14, fontWeight: "700" },
+  regleTexte: { fontSize: 13, lineHeight: 20, flex: 1 },
+
+  masterBox: {
+    marginTop: 24,
+    backgroundColor: C.accentBlueSoft,
+    borderWidth: 1,
+    borderColor: C.accentBlue + "50",
+    borderRadius: 14,
+    overflow: "hidden",
+  },
+  masterLabel: { fontSize: 10, letterSpacing: 2, color: C.accentBlue, fontFamily: "monospace", fontWeight: "700", padding: 16, paddingBottom: 12 },
+  masterQuote: { color: C.textPrimary, fontSize: 14, lineHeight: 24, fontStyle: "italic", paddingHorizontal: 16, paddingBottom: 16 },
+  masterFooter: { backgroundColor: C.accentBlue + "15", padding: 14 },
+  masterSub: { color: C.accentBlue, fontSize: 12, fontWeight: "600" },
+
+  // Semaine
+  weekCard: {
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 20,
+  },
+  weekLabel: { fontSize: 9, letterSpacing: 2.5, color: C.textMuted, fontFamily: "monospace", marginBottom: 4 },
+  weekDay: { fontSize: 18, fontWeight: "700", color: C.textPrimary },
+  scorePill: { borderWidth: 1, borderRadius: 20, paddingHorizontal: 14, paddingVertical: 6 },
+  scorePillText: { fontSize: 14, fontWeight: "700" },
+
+  progressBg: { height: 6, backgroundColor: C.surface2, borderRadius: 3, overflow: "hidden", marginBottom: 6 },
+  progressFill: { height: 6, borderRadius: 3 },
+  progressLabel: { color: C.textMuted, fontSize: 11, fontFamily: "monospace" },
+
+  objRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: C.surface,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 7,
+    gap: 12,
+  },
+  objRowChecked: { backgroundColor: C.accentSoft, borderColor: C.accent + "50" },
+  objRowMissed: { backgroundColor: C.dangerSoft, borderColor: C.danger + "40" },
+  checkbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 7,
     borderWidth: 1.5,
-    borderColor: "rgba(255,255,255,0.2)",
+    borderColor: C.border,
     alignItems: "center",
     justifyContent: "center",
+    backgroundColor: C.surface2,
   },
-  checkBoxChecked: {
-    backgroundColor: "#27AE60",
-    borderColor: "#27AE60",
-  },
-  checkMark: { color: "#fff", fontSize: 13, fontWeight: "700" },
-  objectifText: { color: "#aaa", fontSize: 14, lineHeight: 20, flex: 1 },
-  objectifTextChecked: { color: "#c8c0b0", textDecorationLine: "line-through" },
-  missedMark: { color: "#C0392B", fontSize: 16 },
+  checkboxChecked: { backgroundColor: C.accent, borderColor: C.accent },
+  checkboxMissed: { backgroundColor: C.dangerSoft, borderColor: C.danger },
+  checkmark: { color: C.bg, fontSize: 13, fontWeight: "800" },
+  objText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
+  objTextChecked: { color: C.accent, textDecorationLine: "line-through" },
+  objTextMissed: { color: C.danger + "AA" },
 
-  validateSection: { marginTop: 24, marginBottom: 12 },
   validateBtn: {
-    backgroundColor: "rgba(139,115,85,0.15)",
-    borderWidth: 1,
-    borderColor: "rgba(139,115,85,0.4)",
-    borderRadius: 10,
+    backgroundColor: C.accent,
+    borderRadius: 12,
     padding: 16,
     alignItems: "center",
   },
-  validateBtnText: { color: "#c8b896", fontSize: 12, letterSpacing: 3, fontFamily: "monospace" },
-  validateDisabledBtn: {
+  validateBtnText: { color: C.bg, fontSize: 13, fontWeight: "800", letterSpacing: 2 },
+  validateWaiting: {
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.06)",
-    borderRadius: 10,
+    borderColor: C.border,
+    borderRadius: 12,
     padding: 16,
     alignItems: "center",
   },
-  validateDisabledText: { color: "#444", fontSize: 12, fontFamily: "monospace" },
-
-  recapBtn: {
-    marginTop: 16,
-    marginBottom: 8,
-    backgroundColor: "rgba(255,255,255,0.03)",
+  validateWaitingText: { color: C.textMuted, fontSize: 12, fontFamily: "monospace" },
+  bilanBtn: {
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.08)",
-    borderRadius: 10,
+    borderColor: C.accentBlue + "50",
+    borderRadius: 12,
     padding: 14,
     alignItems: "center",
   },
-  recapBtnText: { color: "#888", fontSize: 13 },
+  bilanBtnText: { color: C.accentBlue, fontSize: 13, fontWeight: "600" },
 
-  divider: {
-    height: 1,
-    backgroundColor: "rgba(255,255,255,0.06)",
-    marginVertical: 28,
-  },
+  divider: { height: 1, backgroundColor: C.border, marginVertical: 24 },
 
   todoRow: {
     flexDirection: "row",
     alignItems: "flex-start",
-    gap: 12,
-    marginBottom: 10,
+    gap: 10,
+    backgroundColor: C.surface,
+    borderLeftWidth: 3,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 7,
   },
-  todoIcon: { fontSize: 16, marginTop: 1 },
-  todoText: { color: "#aaa", fontSize: 14, lineHeight: 22, flex: 1 },
+  todoCheck: { fontSize: 14, color: C.accent, fontWeight: "700", marginTop: 1 },
+  todoText: { color: C.textSecondary, fontSize: 13, lineHeight: 20, flex: 1 },
 
   // Modal
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: "rgba(0,0,0,0.85)",
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 24,
-  },
-  modalBox: {
-    backgroundColor: "#111118",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: 16,
-    padding: 28,
-    width: "100%",
-  },
-  modalScore: { fontSize: 48, fontWeight: "700", textAlign: "center", marginBottom: 8 },
-  modalLabel: { fontSize: 16, fontWeight: "600", textAlign: "center", marginBottom: 20, letterSpacing: 1 },
-  modalDivider: { height: 1, backgroundColor: "rgba(255,255,255,0.07)", marginBottom: 20 },
-  modalMessage: { color: "#aaa", fontSize: 14, lineHeight: 24 },
+  overlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.88)", alignItems: "center", justifyContent: "center", padding: 20 },
+  modal: { backgroundColor: C.surface, borderWidth: 1, borderColor: C.border, borderRadius: 18, width: "100%", overflow: "hidden" },
+  modalTop: { alignItems: "center", padding: 28, paddingBottom: 20 },
+  modalEmoji: { fontSize: 42, marginBottom: 8 },
+  modalScore: { fontSize: 52, fontWeight: "800", marginBottom: 4 },
+  modalLabel: { fontSize: 15, fontWeight: "600", letterSpacing: 1 },
+  modalMsg: { color: C.textSecondary, fontSize: 14, lineHeight: 24 },
   modalClose: {
-    marginTop: 24,
+    margin: 16,
+    marginTop: 4,
+    backgroundColor: C.surface2,
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
-    borderRadius: 8,
-    padding: 12,
+    borderColor: C.border,
+    borderRadius: 10,
+    padding: 14,
     alignItems: "center",
   },
-  modalCloseText: { color: "#888", fontSize: 13, letterSpacing: 1, fontFamily: "monospace" },
+  modalCloseText: { color: C.textSecondary, fontSize: 13, fontWeight: "600" },
 });
