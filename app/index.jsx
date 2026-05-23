@@ -440,11 +440,7 @@ function ModelDownloadScreen({ onDownloaded }) {
         Phi-3 mini – IA locale
       </Text>
       <Text style={{ fontSize: 12, color: "#8B949E", textAlign: "center", marginBottom: 24, lineHeight: 18 }}>
-        Un modèle IA tourne 100{'%'} sur ton téléphone.{"
-"}
-        Téléchargement unique de 2.2 Go requis.{"
-"}
-        Ensuite ça marche sans internet.
+        {"Un modèle IA tourne 100% sur ton téléphone.\nTéléchargement unique de 2.2 Go requis.\nEnsuite ça marche sans internet."}
       </Text>
 
       {/* Specs */}
