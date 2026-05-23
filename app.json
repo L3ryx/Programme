@@ -5,6 +5,12 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "icon": "./LOGO_LEXOU.png",
+    "splash": {
+      "image": "./LOGO_LEXOU.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -12,7 +18,11 @@
       "bundleIdentifier": "com.lexou.app"
     },
     "android": {
-      "package": "com.lexou.app"
+      "package": "com.lexou.app",
+      "adaptiveIcon": {
+        "foregroundImage": "./LOGO_LEXOU.png",
+        "backgroundColor": "#000000"
+      }
     },
     "extra": {
       "eas": {
