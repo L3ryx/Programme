@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "CoupleApp",
-    "slug": "alemille-q2bepmn9ek0ysfpkglh7g",
+    "slug": "lexou2",
     "version": "2.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -9,7 +9,7 @@
     "scheme": "coupleapp",
     "extra": {
       "eas": {
-        "projectId": "774c83ac-71f6-4cb3-9620-1ba9574789f5"
+        "projectId": "4143129d-ef1d-4d18-a143-098f2bc07a5f"
       }
     },
     "ios": {
