@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "CoupleApp",
+    "slug": "alemille-q2bepmn9ek0ysfpkglh7g",
+    "version": "2.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "scheme": "coupleapp",
+    "extra": {
+      "eas": {
+        "projectId": "774c83ac-71f6-4cb3-9620-1ba9574789f5"
+      }
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.alemille.appname"
+    },
+    "android": {
+      "package": "com.alemille.appname",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a1a2e"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#e94560"
+        }
+      ]
+    ]
+  }
+}
