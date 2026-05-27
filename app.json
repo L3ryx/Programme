@@ -23,7 +23,8 @@
       "adaptiveIcon": {
         "backgroundColor": "#1a1a2e"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "jsEngine": "hermes"
     },
     "web": {},
     "plugins": [
