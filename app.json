@@ -23,7 +23,8 @@
       "adaptiveIcon": {
         "backgroundColor": "#1a1a2e"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "kotlinVersion": "1.9.24"
     },
     "web": {},
     "plugins": [
