@@ -6,6 +6,12 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "scheme": "coupleapp",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a1a2e"
+    },
     "extra": {
       "eas": {
         "projectId": "01faf6bc-45d6-4b49-b862-9db252a98be6"
@@ -22,6 +28,7 @@
       "package": "com.alemille.appname",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#1a1a2e"
       },
       "predictiveBackGestureEnabled": false,
