@@ -1,9 +1,55 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { useRouter, useSegments } from 'expo-router';
-import { View, ActivityIndicator } from 'react-native';
+import { View, ActivityIndicator, Text, ScrollView, TouchableOpacity, Clipboard } from 'react-native';
+import React from 'react';
+
+// Attrape les erreurs JS et les affiche à l'écran
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { error: null };
+  }
+
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    this.setState({ error: error.message + '\n\n' + error.stack + '\n\n' + info.componentStack });
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error: error.message + '\n\n' + error.stack };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#1a1a2e', padding: 20, paddingTop: 60 }}>
+          <Text style={{ color: '#e94560', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+            💥 Erreur détectée
+          </Text>
+          <TouchableOpacity
+            onPress={() => Clipboard.setString(this.state.error || '')}
+            style={{ backgroundColor: '#e94560', padding: 10, borderRadius: 8, marginBottom: 12 }}
+          >
+            <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>
+              📋 Copier l'erreur
+            </Text>
+          </TouchableOpacity>
+          <ScrollView style={{ backgroundColor: '#16213e', borderRadius: 8, padding: 12 }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontFamily: 'monospace' }}>
+              {this.state.error}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function NavigationGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -33,14 +79,16 @@ function NavigationGuard({ children }: { children: React.ReactNode }) {
 
 export default function RootLayout() {
   return (
-    <AuthProvider>
-      <NavigationGuard>
-        <StatusBar style="light" />
-        <Stack screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="(auth)" />
-          <Stack.Screen name="(tabs)" />
-        </Stack>
-      </NavigationGuard>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <NavigationGuard>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+        </NavigationGuard>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }
