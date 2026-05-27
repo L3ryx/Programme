@@ -8,25 +8,24 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function LoginScreen() {
   const { login } = useAuth();
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const handleLogin = async () => {
-    if (!email.trim() || !password.trim()) {
+    if (!username.trim() || !password.trim()) {
       Alert.alert('Erreur', 'Remplis tous les champs.');
       return;
     }
     setLoading(true);
     try {
-      await login(email.trim().toLowerCase(), password);
+      await login(username.trim().toLowerCase(), password);
     } catch (e: any) {
       const msg =
-        e.code === 'auth/user-not-found' ? 'Compte introuvable.' :
+        e.code === 'auth/user-not-found' ? 'Identifiant introuvable.' :
         e.code === 'auth/wrong-password' ? 'Mot de passe incorrect.' :
-        e.code === 'auth/invalid-email' ? 'Email invalide.' :
-        e.code === 'auth/invalid-credential' ? 'Email ou mot de passe incorrect.' :
+        e.code === 'auth/invalid-credential' ? 'Identifiant ou mot de passe incorrect.' :
         'Erreur de connexion. Réessaie.';
       Alert.alert('Connexion échouée', msg);
     } finally {
@@ -55,15 +54,14 @@ export default function LoginScreen() {
 
         {/* Form */}
         <View style={styles.form}>
-          <Text style={styles.label}>Adresse email</Text>
+          <Text style={styles.label}>Identifiant</Text>
           <TextInput
             style={styles.input}
-            placeholder="exemple@email.com"
+            placeholder="ex: alex"
             placeholderTextColor="#555"
-            value={email}
-            onChangeText={setEmail}
+            value={username}
+            onChangeText={setUsername}
             autoCapitalize="none"
-            keyboardType="email-address"
             autoCorrect={false}
           />
 
@@ -103,14 +101,6 @@ export default function LoginScreen() {
               <Text style={styles.registerLink}>Créer un compte</Text>
             </TouchableOpacity>
           </Link>
-        </View>
-
-        {/* Accounts info */}
-        <View style={styles.infoBox}>
-          <Text style={styles.infoTitle}>📋 Comptes de l'app</Text>
-          <Text style={styles.infoItem}>👤 alex@alemille.app</Text>
-          <Text style={styles.infoItem}>👤 camille@alemille.app</Text>
-          <Text style={styles.infoNote}>Crée les comptes via "Créer un compte" ci-dessus</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -152,12 +142,4 @@ const styles = StyleSheet.create({
   registerRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
   registerText: { color: '#666', fontSize: 14 },
   registerLink: { color: '#e94560', fontSize: 14, fontWeight: '700' },
-
-  infoBox: {
-    backgroundColor: '#16213e', borderRadius: 14, padding: 16,
-    borderWidth: 1, borderColor: '#0f3460', gap: 6,
-  },
-  infoTitle: { color: '#e94560', fontWeight: '700', fontSize: 14, marginBottom: 4 },
-  infoItem: { color: '#aaa', fontSize: 13 },
-  infoNote: { color: '#555', fontSize: 11, marginTop: 4, fontStyle: 'italic' },
 });
