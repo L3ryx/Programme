@@ -10,14 +10,18 @@ export default function RegisterScreen() {
   const { register } = useAuth();
   const router = useRouter();
   const [displayName, setDisplayName] = useState('');
-  const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handleRegister = async () => {
-    if (!displayName.trim() || !email.trim() || !password || !confirm) {
+    if (!displayName.trim() || !username.trim() || !password || !confirm) {
       Alert.alert('Erreur', 'Remplis tous les champs.');
+      return;
+    }
+    if (!/^[a-zA-Z0-9_]+$/.test(username.trim())) {
+      Alert.alert('Erreur', "L'identifiant ne peut contenir que des lettres, chiffres et _");
       return;
     }
     if (password !== confirm) {
@@ -30,11 +34,10 @@ export default function RegisterScreen() {
     }
     setLoading(true);
     try {
-      await register(email.trim().toLowerCase(), password, displayName.trim());
+      await register(username.trim().toLowerCase(), password, displayName.trim());
     } catch (e: any) {
       const msg =
-        e.code === 'auth/email-already-in-use' ? 'Cet email est déjà utilisé.' :
-        e.code === 'auth/invalid-email' ? 'Email invalide.' :
+        e.code === 'auth/email-already-in-use' ? 'Cet identifiant est déjà utilisé.' :
         e.code === 'auth/weak-password' ? 'Mot de passe trop faible (min. 6 caractères).' :
         'Erreur lors de la création du compte.';
       Alert.alert('Échec', msg);
@@ -70,15 +73,14 @@ export default function RegisterScreen() {
             autoCapitalize="words"
           />
 
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>Identifiant</Text>
           <TextInput
             style={styles.input}
-            placeholder="exemple@email.com"
+            placeholder="ex: alex (lettres, chiffres, _)"
             placeholderTextColor="#555"
-            value={email}
-            onChangeText={setEmail}
+            value={username}
+            onChangeText={setUsername}
             autoCapitalize="none"
-            keyboardType="email-address"
             autoCorrect={false}
           />
 
