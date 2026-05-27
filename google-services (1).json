@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "282371019831",
+    "project_id": "alemille-b7619",
+    "storage_bucket": "alemille-b7619.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:282371019831:android:079204ca5c87540c329bb2",
+        "android_client_info": {
+          "package_name": "com.alemille.appname"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCN4fnXfl5k37wwKTe1-8sksGuvAAY3XMk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
