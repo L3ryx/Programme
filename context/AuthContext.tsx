@@ -10,18 +10,21 @@ import {
 import { doc, setDoc, getDoc, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../config/firebase';
 
+// Convertit un identifiant en email factice pour Firebase
+const usernameToEmail = (username: string) => `${username}@coupleapp.local`;
+
 interface AuthContextType {
   user: User | null;
   userProfile: UserProfile | null;
   loading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, displayName: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string, displayName: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
 export interface UserProfile {
   uid: string;
-  email: string;
+  username: string;
   displayName: string;
   fcmToken?: string;
   createdAt: any;
@@ -50,16 +53,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return unsubscribe;
   }, []);
 
-  const login = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+  const login = async (username: string, password: string) => {
+    await signInWithEmailAndPassword(auth, usernameToEmail(username), password);
   };
 
-  const register = async (email: string, password: string, displayName: string) => {
-    const { user: newUser } = await createUserWithEmailAndPassword(auth, email, password);
+  const register = async (username: string, password: string, displayName: string) => {
+    const { user: newUser } = await createUserWithEmailAndPassword(
+      auth,
+      usernameToEmail(username),
+      password
+    );
     await updateProfile(newUser, { displayName });
     const profile: UserProfile = {
       uid: newUser.uid,
-      email,
+      username,
       displayName,
       createdAt: serverTimestamp(),
     };
