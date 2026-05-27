@@ -23,11 +23,7 @@
       "adaptiveIcon": {
         "backgroundColor": "#1a1a2e"
       },
-      "predictiveBackGestureEnabled": false,
-      "kotlinVersion": "1.9.24",
-      "compileSdkVersion": 34,
-      "targetSdkVersion": 34,
-      "buildToolsVersion": "34.0.0"
+      "predictiveBackGestureEnabled": false
     },
     "web": {},
     "plugins": [
@@ -39,7 +35,7 @@
         }
       ]
     ],
-    "sdkVersion": "56.0.0",
+    "sdkVersion": "53.0.0",
     "platforms": [
       "ios",
       "android"
