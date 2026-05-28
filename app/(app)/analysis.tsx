@@ -12,7 +12,8 @@ import { useApp } from '../../src/context/AppContext';
 import { analyzeWithPhi3, type CommunicationScore } from '../../src/lib/phi3/analyzer';
 import { ModelSetupCard } from '../../src/components/ModelSetupCard';
 import { usePhiModel } from '../../src/hooks/usePhiModel';
-import { supabase } from '../../src/lib/supabase';
+import { databases, DATABASE_ID, COLLECTION_RELATIONSHIP_ANALYSES } from '../../src/lib/appwrite';
+import { ID } from 'appwrite';
 import { getMessages, LocalMessage } from '../../src/lib/localDb';
 
 const RED_COLORS: Record<string, string> = {
@@ -102,14 +103,23 @@ export default function AnalysisScreen() {
 
   async function saveAnalysis() {
     if (!result || !profile) return;
-    await supabase.from('relationship_analyses').insert({
-      user_id: profile.id,
-      score: result.total,
-      red_flags: result.redFlags.map((f) => f.label),
-      positive_signals: result.greenFlags.map((f) => f.label),
-      summary: result.summary,
-    });
-    setSaved(true);
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTION_RELATIONSHIP_ANALYSES,
+        ID.unique(),
+        {
+          user_id: profile.id,
+          score: result.total,
+          red_flags: result.redFlags.map((f) => f.label),
+          positive_signals: result.greenFlags.map((f) => f.label),
+          summary: result.summary,
+        }
+      );
+      setSaved(true);
+    } catch (e) {
+      console.error('Sauvegarde échouée:', e);
+    }
   }
 
   if (!partner) {
