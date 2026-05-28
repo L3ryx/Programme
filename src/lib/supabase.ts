@@ -1,13 +1,14 @@
 /**
  * supabase.ts — Client Supabase
  *
- * Supabase joue ici le rôle d'un relais de transit uniquement :
- *   - Authentification (OTP SMS)
- *   - Annuaire des clés publiques (profils)
- *   - Canal Realtime pour transit des enveloppes chiffrées
+ * Authentification :
+ *   - Email + mot de passe
+ *   - Double authentification SMS (OTP obligatoire à chaque connexion)
  *
- * Les messages sont SUPPRIMÉS du serveur dès livraison (trigger Postgres).
- * Aucun historique de messages n'existe côté serveur.
+ * Rôle de Supabase :
+ *   - Auth (email/password + OTP SMS 2FA)
+ *   - Annuaire des profils et clés publiques
+ *   - Transit éphémère des messages chiffrés
  */
 
 import 'react-native-url-polyfill/auto';
@@ -25,9 +26,9 @@ const ExpoSecureStoreAdapter = {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage:         ExpoSecureStoreAdapter,
-    autoRefreshToken: true,
-    persistSession:  true,
+    storage:            ExpoSecureStoreAdapter,
+    autoRefreshToken:   true,
+    persistSession:     true,
     detectSessionInUrl: false,
   },
   realtime: {
@@ -45,36 +46,28 @@ export type Database = {
       profiles: {
         Row: {
           id:               string;
-          phone:            string;
+          phone:            string | null;
+          email:            string | null;
+          username:         string | null;      // @username unique
           display_name:     string;
-          /** Clé d'identité X3DH longue durée (Curve25519, base64) */
           identity_key:     string;
-          /** Signed PreKey courante (Curve25519, base64) — rotée ~hebdo */
           signed_pre_key:   string;
-          /** Identifiant numérique de la signed pre key */
           signed_pre_key_id: number;
+          public_key:       string;
           avatar_url:       string | null;
           partner_id:       string | null;
+          partner_locked:   boolean;            // true = liaison permanente
           created_at:       string;
-          // Champ legacy conservé pour migration douce
-          public_key:       string;
         };
-        Insert: Omit<Database['public']['Tables']['profiles']['Row'], 'created_at'>;
+        Insert: Omit<Database['public']['Tables']['profiles']['Row'], 'created_at' | 'partner_locked'>;
         Update: Partial<Database['public']['Tables']['profiles']['Insert']>;
       };
 
-      /**
-       * Table de transit éphémère.
-       * Un trigger Postgres supprime la ligne dès que delivered_at est renseigné,
-       * ou après expires_at (max 30 secondes).
-       * → Le serveur ne stocke jamais les messages durablement.
-       */
       transit_messages: {
         Row: {
           id:           string;
           sender_id:    string;
           receiver_id:  string;
-          /** JSON de EncryptedEnvelope — opaque pour le serveur */
           envelope:     string;
           created_at:   string;
           expires_at:   string;
