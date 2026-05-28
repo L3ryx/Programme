@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../src/lib/supabase';
-import { useAppStore } from '../../src/store/appStore';
+import { useApp } from '../../src/context/AppContext';
 import {
   sendMessage,
   subscribeToMessages,
@@ -27,7 +27,7 @@ const KEY_ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours
 const LAST_KEY_ROTATION_KEY     = 'last_key_rotation';
 
 export default function ChatScreen() {
-  const { profile, partner, setPartner } = useAppStore();
+  const { profile, partner, setPartner } = useApp();
   const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [text, setText]         = useState('');
   const [sending, setSending]   = useState(false);
