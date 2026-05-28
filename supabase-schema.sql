@@ -1,139 +1,202 @@
 -- ============================================================
--- AANDC - Schéma Supabase
--- À exécuter dans : Supabase Dashboard > SQL Editor
+-- AANDC — Schéma Supabase (version stockage local + transit pur)
+--
+-- Architecture :
+--   • Les messages sont UNIQUEMENT stockés sur les appareils des utilisateurs.
+--   • Supabase sert de relais de transit éphémère (max 30 s).
+--   • Un trigger supprime chaque message dès réception confirmée.
+--   • Le serveur ne peut PAS lire les messages (chiffrement E2E Double Ratchet).
 -- ============================================================
 
--- Extension UUID
-create extension if not exists "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 -- ============================================================
--- TABLE: profiles
+-- TABLE: profiles — annuaire des clés publiques X3DH
 -- ============================================================
-create table if not exists public.profiles (
-  id           uuid primary key references auth.users(id) on delete cascade,
-  phone        text unique not null,
-  display_name text not null default '',
-  public_key   text not null default '',
-  avatar_url   text,
-  partner_id   uuid references public.profiles(id) on delete set null,
-  created_at   timestamptz not null default now()
+CREATE TABLE IF NOT EXISTS public.profiles (
+  id                 UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  phone              TEXT UNIQUE NOT NULL,
+  display_name       TEXT NOT NULL DEFAULT '',
+
+  -- Clé d'identité longue durée (Curve25519, base64)
+  identity_key       TEXT NOT NULL DEFAULT '',
+  -- Signed PreKey courante (Curve25519, base64) — rotée ~hebdomadairement
+  signed_pre_key     TEXT NOT NULL DEFAULT '',
+  -- Identifiant numérique de la signed pre key
+  signed_pre_key_id  BIGINT NOT NULL DEFAULT 0,
+
+  -- Champ legacy conservé pendant migration
+  public_key         TEXT NOT NULL DEFAULT '',
+
+  avatar_url         TEXT,
+  partner_id         UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-alter table public.profiles enable row level security;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
-create policy "Utilisateur peut voir son propre profil"
-  on public.profiles for select
-  using (auth.uid() = id);
+CREATE POLICY "Voir son propre profil"
+  ON public.profiles FOR SELECT
+  USING (auth.uid() = id);
 
-create policy "Utilisateur peut mettre à jour son profil"
-  on public.profiles for update
-  using (auth.uid() = id);
+CREATE POLICY "Mettre à jour son propre profil"
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id);
 
-create policy "Tout utilisateur peut créer un profil"
-  on public.profiles for insert
-  with check (auth.uid() = id);
+CREATE POLICY "Créer son profil"
+  ON public.profiles FOR INSERT
+  WITH CHECK (auth.uid() = id);
 
--- Permettre de chercher par numéro de téléphone (pour connecter partenaire)
-create policy "Recherche par téléphone"
-  on public.profiles for select
-  using (true);
+-- Permettre la recherche par téléphone et par ID (pour récupérer les clés publiques)
+CREATE POLICY "Recherche publique de profils"
+  ON public.profiles FOR SELECT
+  USING (true);
 
 -- ============================================================
--- TABLE: messages
+-- TABLE: transit_messages — relais éphémère UNIQUEMENT
+--
+-- IMPORTANT : cette table ne stocke pas les messages durablement.
+-- Chaque ligne est supprimée automatiquement :
+--   1. Dès que delivered_at est renseigné (accusé de réception)
+--   2. Après expires_at au plus tard (max 30 secondes)
+--
+-- Le contenu (envelope) est un blob JSON chiffré :
+--   le serveur ne peut pas le lire.
 -- ============================================================
-create table if not exists public.messages (
-  id                 uuid primary key default uuid_generate_v4(),
-  sender_id          uuid not null references public.profiles(id) on delete cascade,
-  receiver_id        uuid not null references public.profiles(id) on delete cascade,
-  encrypted_content  text not null,
-  nonce              text not null,
-  read_at            timestamptz,
-  created_at         timestamptz not null default now()
+CREATE TABLE IF NOT EXISTS public.transit_messages (
+  id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  sender_id    UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  receiver_id  UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+
+  -- Enveloppe chiffrée Double Ratchet — opaque pour le serveur
+  envelope     TEXT NOT NULL,
+
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at   TIMESTAMPTZ NOT NULL,         -- max NOW() + 30s côté client
+  delivered_at TIMESTAMPTZ                   -- NULL = non livré
 );
 
-create index messages_sender_receiver_idx on public.messages(sender_id, receiver_id, created_at);
+CREATE INDEX transit_receiver_idx ON public.transit_messages(receiver_id, delivered_at);
+CREATE INDEX transit_expires_idx  ON public.transit_messages(expires_at);
 
-alter table public.messages enable row level security;
+ALTER TABLE public.transit_messages ENABLE ROW LEVEL SECURITY;
 
-create policy "Voir ses propres messages"
-  on public.messages for select
-  using (auth.uid() = sender_id or auth.uid() = receiver_id);
+CREATE POLICY "Envoyer un message de transit"
+  ON public.transit_messages FOR INSERT
+  WITH CHECK (auth.uid() = sender_id);
 
-create policy "Envoyer des messages"
-  on public.messages for insert
-  with check (auth.uid() = sender_id);
+CREATE POLICY "Recevoir ses messages de transit"
+  ON public.transit_messages FOR SELECT
+  USING (auth.uid() = receiver_id OR auth.uid() = sender_id);
 
-create policy "Marquer comme lu"
-  on public.messages for update
-  using (auth.uid() = receiver_id)
-  with check (auth.uid() = receiver_id);
+CREATE POLICY "Accuser réception (destinataire uniquement)"
+  ON public.transit_messages FOR UPDATE
+  USING (auth.uid() = receiver_id)
+  WITH CHECK (auth.uid() = receiver_id);
 
 -- ============================================================
--- TABLE: relationship_analyses
+-- TRIGGER : suppression automatique dès livraison confirmée
 -- ============================================================
-create table if not exists public.relationship_analyses (
-  id               uuid primary key default uuid_generate_v4(),
-  user_id          uuid not null references public.profiles(id) on delete cascade,
-  score            integer not null check (score >= 0 and score <= 100),
-  red_flags        text[] not null default '{}',
-  positive_signals text[] not null default '{}',
-  summary          text not null default '',
-  analyzed_at      timestamptz not null default now()
+CREATE OR REPLACE FUNCTION public.delete_on_delivery()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  IF NEW.delivered_at IS NOT NULL THEN
+    DELETE FROM public.transit_messages WHERE id = NEW.id;
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_delete_on_delivery
+  AFTER UPDATE OF delivered_at ON public.transit_messages
+  FOR EACH ROW
+  EXECUTE FUNCTION public.delete_on_delivery();
+
+-- ============================================================
+-- CRON : nettoyage des messages expirés (pg_cron ou edge function)
+--
+-- À activer dans Supabase Dashboard > Database > Extensions > pg_cron
+-- puis exécuter :
+--
+--   SELECT cron.schedule(
+--     'clean-transit',
+--     '* * * * *',    -- chaque minute
+--     $$ DELETE FROM public.transit_messages WHERE expires_at < NOW() $$
+--   );
+--
+-- Alternative sans pg_cron : Edge Function planifiée (voir docs Supabase)
+-- ============================================================
+
+-- ============================================================
+-- REALTIME : activer pour la table transit uniquement
+-- ============================================================
+ALTER PUBLICATION supabase_realtime ADD TABLE public.transit_messages;
+
+-- ============================================================
+-- TABLE: relationship_analyses — analyses stockées localement
+-- (conservée mais la vraie persistance est côté app via SQLite)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.relationship_analyses (
+  id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id          UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  score            INTEGER NOT NULL CHECK (score >= 0 AND score <= 100),
+  red_flags        TEXT[] NOT NULL DEFAULT '{}',
+  positive_signals TEXT[] NOT NULL DEFAULT '{}',
+  summary          TEXT NOT NULL DEFAULT '',
+  analyzed_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-alter table public.relationship_analyses enable row level security;
+ALTER TABLE public.relationship_analyses ENABLE ROW LEVEL SECURITY;
 
-create policy "Voir ses propres analyses"
-  on public.relationship_analyses for select
-  using (auth.uid() = user_id);
+CREATE POLICY "Voir ses propres analyses"
+  ON public.relationship_analyses FOR SELECT
+  USING (auth.uid() = user_id);
 
-create policy "Créer une analyse"
-  on public.relationship_analyses for insert
-  with check (auth.uid() = user_id);
+CREATE POLICY "Créer une analyse"
+  ON public.relationship_analyses FOR INSERT
+  WITH CHECK (auth.uid() = user_id);
 
 -- ============================================================
 -- TABLE: push_tokens
 -- ============================================================
-create table if not exists public.push_tokens (
-  id         uuid primary key default uuid_generate_v4(),
-  user_id    uuid not null references public.profiles(id) on delete cascade,
-  token      text not null,
-  updated_at timestamptz not null default now(),
-  unique(user_id)
+CREATE TABLE IF NOT EXISTS public.push_tokens (
+  id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id    UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+  token      TEXT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE(user_id)
 );
 
-alter table public.push_tokens enable row level security;
+ALTER TABLE public.push_tokens ENABLE ROW LEVEL SECURITY;
 
-create policy "Gérer son propre token"
-  on public.push_tokens for all
-  using (auth.uid() = user_id)
-  with check (auth.uid() = user_id);
-
--- ============================================================
--- REALTIME: activer pour les messages
--- ============================================================
-alter publication supabase_realtime add table public.messages;
+CREATE POLICY "Gérer son propre token"
+  ON public.push_tokens FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 -- ============================================================
 -- FONCTION: auto-création profil à l'inscription
 -- ============================================================
-create or replace function public.handle_new_user()
-returns trigger
-language plpgsql
-security definer set search_path = public
-as $$
-begin
-  insert into public.profiles (id, phone, display_name)
-  values (
-    new.id,
-    coalesce(new.phone, new.email, ''),
-    coalesce(new.phone, new.email, 'Utilisateur')
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER SET search_path = public
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, phone, display_name)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.phone, NEW.email, ''),
+    COALESCE(NEW.phone, NEW.email, 'Utilisateur')
   )
-  on conflict (id) do nothing;
-  return new;
-end;
+  ON CONFLICT (id) DO NOTHING;
+  RETURN NEW;
+END;
 $$;
 
-create or replace trigger on_auth_user_created
-  after insert on auth.users
-  for each row execute procedure public.handle_new_user();
+CREATE OR REPLACE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE PROCEDURE public.handle_new_user();
