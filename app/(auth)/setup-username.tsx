@@ -13,7 +13,8 @@ import {
   ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '../../src/lib/supabase';
+import { databases, DATABASE_ID, COLLECTION_PROFILES, getProfileByUsername, updateProfile } from '../../src/lib/appwrite';
+import { Query } from 'appwrite';
 import { useApp } from '../../src/context/AppContext';
 
 export default function SetupUsernameScreen() {
@@ -34,37 +35,28 @@ export default function SetupUsernameScreen() {
     if (cleaned.length < 3) return;
 
     setChecking(true);
-    const { data } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('username', cleaned)
-      .maybeSingle();
+    const existing = await getProfileByUsername(cleaned);
     setChecking(false);
-    setAvailable(!data);
+    setAvailable(!existing);
   }
 
   async function saveUsername() {
     if (!isValid || !available || !profile) return;
     setSaving(true);
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .update({ username: username.toLowerCase() })
-      .eq('id', profile.id)
-      .select()
-      .single();
+    const updated = await updateProfile(profile.$id, {
+      username: username.toLowerCase(),
+    });
 
-    if (error) {
+    if (!updated) {
       Alert.alert('Erreur', 'Ce nom d\'utilisateur est déjà pris.');
       setAvailable(false);
       setSaving(false);
       return;
     }
 
-    if (data) {
-      setProfile(data);
-      setNeedsUsername(false);
-    }
+    setProfile(updated);
+    setNeedsUsername(false);
     setSaving(false);
     router.replace('/(app)/home');
   }
