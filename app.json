@@ -14,7 +14,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": "01faf6bc-45d6-4b49-b862-9db252a98be6"
+        "projectId": "a59376af-abb7-4d1a-938e-fd3345da177c"
       },
       "router": {
         "origin": false
@@ -43,11 +43,6 @@
           "color": "#e94560"
         }
       ]
-    ],
-    "sdkVersion": "53.0.0",
-    "platforms": [
-      "ios",
-      "android"
     ]
   }
 }
