@@ -1,7 +1,7 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import { supabase } from './supabase';
+import { databases, DATABASE_ID, COLLECTION_PUSH_TOKENS, ID } from './appwrite';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -39,9 +39,27 @@ export async function registerForPushNotifications(): Promise<string | null> {
 }
 
 export async function savePushToken(userId: string, token: string) {
-  await supabase
-    .from('push_tokens')
-    .upsert({ user_id: userId, token, updated_at: new Date().toISOString() });
+  try {
+    // Tente de mettre à jour le document existant
+    await databases.updateDocument(
+      DATABASE_ID,
+      COLLECTION_PUSH_TOKENS,
+      userId,
+      { token, updated_at: new Date().toISOString() }
+    );
+  } catch {
+    // S'il n'existe pas encore, on le crée (avec $id = userId pour upsert facile)
+    try {
+      await databases.createDocument(
+        DATABASE_ID,
+        COLLECTION_PUSH_TOKENS,
+        userId,
+        { user_id: userId, token, updated_at: new Date().toISOString() }
+      );
+    } catch (e) {
+      console.warn('[notifications] savePushToken error', e);
+    }
+  }
 }
 
 export function scheduleLocalNotification(title: string, body: string) {
