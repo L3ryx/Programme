@@ -10,8 +10,7 @@
       "node": "22.13.0",
       "android": {
         "buildType": "apk",
-        "gradleCommand": ":app:assembleDebug",
-        "withoutCredentials": true
+        "gradleCommand": ":app:assembleRelease"
       },
       "env": {
         "EXPO_PUBLIC_DEBUG": "true"
