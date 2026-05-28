@@ -1,79 +1,108 @@
 -- ============================================================
--- AANDC — Schéma Supabase (version stockage local + transit pur)
+-- SCHEMA SUPABASE — v3.0
 --
--- Architecture :
---   • Les messages sont UNIQUEMENT stockés sur les appareils des utilisateurs.
---   • Supabase sert de relais de transit éphémère (max 30 s).
---   • Un trigger supprime chaque message dès réception confirmée.
---   • Le serveur ne peut PAS lire les messages (chiffrement E2E Double Ratchet).
+-- Nouveautés :
+--   • Authentification email + mot de passe + 2FA SMS (OTP)
+--   • Champ `username` unique obligatoire dans profiles
+--   • Champ `email` dans profiles
+--   • Liaison partenaire PERMANENTE (partner_locked = true dès liaison)
+--   • Aucune possibilité de délier côté DB (RLS bloque UPDATE partner_id)
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "citext";   -- pour username case-insensitive
 
 -- ============================================================
--- TABLE: profiles — annuaire des clés publiques X3DH
+-- TABLE: profiles
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.profiles (
   id                 UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  phone              TEXT UNIQUE NOT NULL,
+  phone              TEXT,                              -- peut être NULL si email-only signup
+  email              TEXT,                              -- email de connexion
+  username           CITEXT UNIQUE,                     -- @username unique, case-insensitive
   display_name       TEXT NOT NULL DEFAULT '',
 
-  -- Clé d'identité longue durée (Curve25519, base64)
+  -- Clés X3DH
   identity_key       TEXT NOT NULL DEFAULT '',
-  -- Signed PreKey courante (Curve25519, base64) — rotée ~hebdomadairement
   signed_pre_key     TEXT NOT NULL DEFAULT '',
-  -- Identifiant numérique de la signed pre key
   signed_pre_key_id  BIGINT NOT NULL DEFAULT 0,
-
-  -- Champ legacy conservé pendant migration
-  public_key         TEXT NOT NULL DEFAULT '',
+  public_key         TEXT NOT NULL DEFAULT '',          -- legacy
 
   avatar_url         TEXT,
   partner_id         UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
+
+  -- Verrou de liaison : une fois true, impossible de changer partner_id
+  partner_locked     BOOLEAN NOT NULL DEFAULT FALSE,
+
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 
+-- Lecture : son propre profil + recherche publique par username
 CREATE POLICY "Voir son propre profil"
   ON public.profiles FOR SELECT
-  USING (auth.uid() = id);
+  USING (true);
 
-CREATE POLICY "Mettre à jour son propre profil"
-  ON public.profiles FOR UPDATE
-  USING (auth.uid() = id);
-
+-- Création : uniquement soi-même
 CREATE POLICY "Créer son profil"
   ON public.profiles FOR INSERT
   WITH CHECK (auth.uid() = id);
 
--- Permettre la recherche par téléphone et par ID (pour récupérer les clés publiques)
-CREATE POLICY "Recherche publique de profils"
-  ON public.profiles FOR SELECT
-  USING (true);
+-- Mise à jour générale (display_name, username, clés, avatar)
+-- BLOQUE la modification de partner_id si partner_locked = true
+CREATE POLICY "Mettre à jour son profil (hors partenaire verrouillé)"
+  ON public.profiles FOR UPDATE
+  USING (auth.uid() = id)
+  WITH CHECK (
+    auth.uid() = id
+    AND (
+      -- Autorise toute MAJ si pas encore verrouillé
+      partner_locked = FALSE
+      -- Si déjà verrouillé, interdit de changer partner_id
+      OR (partner_locked = TRUE AND partner_id IS NOT DISTINCT FROM (
+        SELECT partner_id FROM public.profiles WHERE id = auth.uid()
+      ))
+    )
+  );
 
 -- ============================================================
--- TABLE: transit_messages — relais éphémère UNIQUEMENT
---
--- IMPORTANT : cette table ne stocke pas les messages durablement.
--- Chaque ligne est supprimée automatiquement :
---   1. Dès que delivered_at est renseigné (accusé de réception)
---   2. Après expires_at au plus tard (max 30 secondes)
---
--- Le contenu (envelope) est un blob JSON chiffré :
---   le serveur ne peut pas le lire.
+-- FONCTION : vérouille la liaison dès que partner_id est défini
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.lock_partner_on_link()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+BEGIN
+  -- Si un partner_id vient d'être défini ET qu'il n'était pas là avant
+  IF NEW.partner_id IS NOT NULL AND OLD.partner_id IS NULL THEN
+    NEW.partner_locked := TRUE;
+  END IF;
+  -- Empêche de remettre partner_id à NULL si déjà verrouillé
+  IF OLD.partner_locked = TRUE AND NEW.partner_id IS NULL THEN
+    RAISE EXCEPTION 'La liaison partenaire est permanente et ne peut pas être annulée.';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_lock_partner
+  BEFORE UPDATE OF partner_id ON public.profiles
+  FOR EACH ROW
+  EXECUTE FUNCTION public.lock_partner_on_link();
+
+-- ============================================================
+-- TABLE: transit_messages — relais éphémère (max 30s)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.transit_messages (
   id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   sender_id    UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
   receiver_id  UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-
-  -- Enveloppe chiffrée Double Ratchet — opaque pour le serveur
   envelope     TEXT NOT NULL,
-
   created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at   TIMESTAMPTZ NOT NULL,         -- max NOW() + 30s côté client
-  delivered_at TIMESTAMPTZ                   -- NULL = non livré
+  expires_at   TIMESTAMPTZ NOT NULL,
+  delivered_at TIMESTAMPTZ
 );
 
 CREATE INDEX transit_receiver_idx ON public.transit_messages(receiver_id, delivered_at);
@@ -89,14 +118,12 @@ CREATE POLICY "Recevoir ses messages de transit"
   ON public.transit_messages FOR SELECT
   USING (auth.uid() = receiver_id OR auth.uid() = sender_id);
 
-CREATE POLICY "Accuser réception (destinataire uniquement)"
+CREATE POLICY "Accuser réception"
   ON public.transit_messages FOR UPDATE
   USING (auth.uid() = receiver_id)
   WITH CHECK (auth.uid() = receiver_id);
 
--- ============================================================
--- TRIGGER : suppression automatique dès livraison confirmée
--- ============================================================
+-- Suppression automatique dès livraison
 CREATE OR REPLACE FUNCTION public.delete_on_delivery()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -115,29 +142,10 @@ CREATE TRIGGER trg_delete_on_delivery
   FOR EACH ROW
   EXECUTE FUNCTION public.delete_on_delivery();
 
--- ============================================================
--- CRON : nettoyage des messages expirés (pg_cron ou edge function)
---
--- À activer dans Supabase Dashboard > Database > Extensions > pg_cron
--- puis exécuter :
---
---   SELECT cron.schedule(
---     'clean-transit',
---     '* * * * *',    -- chaque minute
---     $$ DELETE FROM public.transit_messages WHERE expires_at < NOW() $$
---   );
---
--- Alternative sans pg_cron : Edge Function planifiée (voir docs Supabase)
--- ============================================================
-
--- ============================================================
--- REALTIME : activer pour la table transit uniquement
--- ============================================================
 ALTER PUBLICATION supabase_realtime ADD TABLE public.transit_messages;
 
 -- ============================================================
--- TABLE: relationship_analyses — analyses stockées localement
--- (conservée mais la vraie persistance est côté app via SQLite)
+-- TABLE: relationship_analyses
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.relationship_analyses (
   id               UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -178,7 +186,7 @@ CREATE POLICY "Gérer son propre token"
   WITH CHECK (auth.uid() = user_id);
 
 -- ============================================================
--- FONCTION: auto-création profil à l'inscription
+-- FONCTION : auto-création profil à l'inscription
 -- ============================================================
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER
@@ -186,11 +194,13 @@ LANGUAGE plpgsql
 SECURITY DEFINER SET search_path = public
 AS $$
 BEGIN
-  INSERT INTO public.profiles (id, phone, display_name)
+  INSERT INTO public.profiles (id, phone, email, display_name, username)
   VALUES (
     NEW.id,
-    COALESCE(NEW.phone, NEW.email, ''),
-    COALESCE(NEW.phone, NEW.email, 'Utilisateur')
+    NEW.phone,
+    NEW.email,
+    COALESCE(NEW.email, NEW.phone, 'Utilisateur'),
+    NULL   -- username défini lors de l'onboarding
   )
   ON CONFLICT (id) DO NOTHING;
   RETURN NEW;
