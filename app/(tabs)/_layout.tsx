@@ -1,66 +1,94 @@
-import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { useAuth } from '../../context/AuthContext';
-import { TouchableOpacity, View, Text, StyleSheet } from 'react-native';
+import { useEffect } from 'react';
+import { Stack } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
+import { AuthProvider, useAuth } from '../context/AuthContext';
+import { useRouter, useSegments } from 'expo-router';
+import { View, ActivityIndicator, Text, ScrollView, TouchableOpacity } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
+import React from 'react';
 
-export default function TabsLayout() {
-  const { logout, userProfile } = useAuth();
+class ErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { error: string | null }
+> {
+  constructor(props: any) {
+    super(props);
+    this.state = { error: null };
+  }
 
-  return (
-    <Tabs
-      screenOptions={{
-        headerShown: true,
-        headerStyle: { backgroundColor: '#16213e' },
-        headerTintColor: '#fff',
-        headerRight: () => (
-          <View style={styles.headerRight}>
-            <Text style={styles.userName}>{userProfile?.displayName || ''}</Text>
-            <TouchableOpacity onPress={logout} style={styles.logoutBtn}>
-              <Ionicons name="log-out-outline" size={22} color="#e94560" />
-            </TouchableOpacity>
-          </View>
-        ),
-        tabBarStyle: { backgroundColor: '#16213e', borderTopColor: '#0f3460', height: 60 },
-        tabBarActiveTintColor: '#e94560',
-        tabBarInactiveTintColor: '#666',
-        tabBarLabelStyle: { fontSize: 10, marginBottom: 4 },
-      }}
-    >
-      <Tabs.Screen
-        name="messages"
-        options={{
-          title: '💑 CoupleApp',
-          tabBarLabel: 'Messages',
-          tabBarIcon: ({ color, size }) => <Ionicons name="chatbubble-ellipses" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="analyzer"
-        options={{
-          title: 'Analyse',
-          tabBarIcon: ({ color, size }) => <Ionicons name="bar-chart" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="journal"
-        options={{
-          title: 'Journal',
-          tabBarIcon: ({ color, size }) => <Ionicons name="heart" size={size} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="song"
-        options={{
-          title: 'Chanson',
-          tabBarIcon: ({ color, size }) => <Ionicons name="musical-notes" size={size} color={color} />,
-        }}
-      />
-    </Tabs>
-  );
+  componentDidCatch(error: Error, info: React.ErrorInfo) {
+    this.setState({ error: error.message + '\n\n' + error.stack + '\n\n' + info.componentStack });
+  }
+
+  static getDerivedStateFromError(error: Error) {
+    return { error: error.message + '\n\n' + error.stack };
+  }
+
+  render() {
+    if (this.state.error) {
+      return (
+        <View style={{ flex: 1, backgroundColor: '#1a1a2e', padding: 20, paddingTop: 60 }}>
+          <Text style={{ color: '#e94560', fontSize: 18, fontWeight: 'bold', marginBottom: 12 }}>
+            💥 Erreur détectée
+          </Text>
+          <TouchableOpacity
+            onPress={() => Clipboard.setStringAsync(this.state.error || '')}
+            style={{ backgroundColor: '#e94560', padding: 10, borderRadius: 8, marginBottom: 12 }}
+          >
+            <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>
+              📋 Copier l'erreur
+            </Text>
+          </TouchableOpacity>
+          <ScrollView style={{ backgroundColor: '#16213e', borderRadius: 8, padding: 12 }}>
+            <Text style={{ color: '#fff', fontSize: 11, fontFamily: 'monospace' }}>
+              {this.state.error}
+            </Text>
+          </ScrollView>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
 }
 
-const styles = StyleSheet.create({
-  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 8, marginRight: 12 },
-  userName: { color: '#aaa', fontSize: 13 },
-  logoutBtn: { padding: 4 },
-});
+function NavigationGuard({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+  const segments = useSegments();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (loading) return;
+    const inAuthGroup = segments[0] === '(auth)';
+    if (!user && !inAuthGroup) {
+      router.replace('/(auth)/login');
+    } else if (user && inAuthGroup) {
+      router.replace('/(tabs)/messages');
+    }
+  }, [user, loading, segments]);
+
+  if (loading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: '#1a1a2e', alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator size="large" color="#e94560" />
+      </View>
+    );
+  }
+
+  return <>{children}</>;
+}
+
+export default function RootLayout() {
+  return (
+    <ErrorBoundary>
+      <AuthProvider>
+        <NavigationGuard>
+          <StatusBar style="light" />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="(auth)" />
+            <Stack.Screen name="(tabs)" />
+          </Stack>
+        </NavigationGuard>
+      </AuthProvider>
+    </ErrorBoundary>
+  );
+}
