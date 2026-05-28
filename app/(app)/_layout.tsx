@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, Stack } from 'expo-router';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useApp } from '../../src/context/AppContext';
@@ -16,9 +16,13 @@ export default function AppLayout() {
     // Si pas de partenaire → rester sur home (pas de tabs)
   }, [needsUsername, profile?.partner_id]);
 
-  // Si pas de partenaire → afficher uniquement home (pas de barre d'onglets)
+  // Si pas de partenaire → afficher home sans barre d'onglets
   if (!profile?.partner_id) {
-    return null; // home.tsx est affiché directement sans tabs
+    return (
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="home" />
+      </Stack>
+    );
   }
 
   return (
