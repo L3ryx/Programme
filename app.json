@@ -66,7 +66,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "eb032e9e-fdfc-4638-a551-f4d80b98d020"
+        "projectId": "1bf9c7c0-eab3-4518-831c-b5d16e9dec42"
       }
     },
     "owner": "l3ryx",
@@ -74,7 +74,7 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/eb032e9e-fdfc-4638-a551-f4d80b98d020"
+      "url": "https://u.expo.dev/1bf9c7c0-eab3-4518-831c-b5d16e9dec42"
     }
   }
 }
