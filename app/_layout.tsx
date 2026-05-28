@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { AuthProvider, useAuth } from '../context/AuthContext';
 import { useRouter, useSegments } from 'expo-router';
-import { View, ActivityIndicator, Text, ScrollView, TouchableOpacity, Clipboard } from 'react-native';
+import { View, ActivityIndicator, Text, ScrollView, TouchableOpacity } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import React from 'react';
 
-// Attrape les erreurs JS et les affiche à l'écran
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: string | null }
@@ -32,7 +32,7 @@ class ErrorBoundary extends React.Component<
             💥 Erreur détectée
           </Text>
           <TouchableOpacity
-            onPress={() => Clipboard.setString(this.state.error || '')}
+            onPress={() => Clipboard.setStringAsync(this.state.error || '')}
             style={{ backgroundColor: '#e94560', padding: 10, borderRadius: 8, marginBottom: 12 }}
           >
             <Text style={{ color: '#fff', textAlign: 'center', fontWeight: 'bold' }}>
