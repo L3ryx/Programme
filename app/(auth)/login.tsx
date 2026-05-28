@@ -1,11 +1,13 @@
 /**
- * login.tsx — Écran d'authentification
+ * login.tsx — Écran d'authentification (Appwrite)
  *
  * Flux :
- *   INSCRIPTION : email + mot de passe → envoi SMS OTP (2FA) → vérification → onboarding username
- *   CONNEXION   : email + mot de passe → envoi SMS OTP (2FA) → vérification → app
+ *   INSCRIPTION : email + mot de passe → création compte → OTP email (2FA) → onboarding username
+ *   CONNEXION   : email + mot de passe → OTP email (2FA) → app
  *
- * La double authentification SMS est obligatoire à chaque connexion.
+ * Note : Appwrite ne fournit pas nativement la 2FA SMS sans plan Enterprise.
+ * On utilise ici la vérification email OTP (Magic URL / Email Token) disponible
+ * sur tous les plans, y compris Cloud gratuit.
  */
 
 import { useState, useRef } from 'react';
@@ -14,31 +16,31 @@ import {
   StyleSheet, KeyboardAvoidingView, Platform, Alert,
   ActivityIndicator, ScrollView,
 } from 'react-native';
-import { supabase } from '../../src/lib/supabase';
+import { account, createProfile, getProfileById } from '../../src/lib/appwrite';
+import { ID } from 'appwrite';
+import { useApp } from '../../src/context/AppContext';
+import { getIdentityBundle } from '../../src/lib/crypto';
+import { updateProfile } from '../../src/lib/appwrite';
 
-type Step = 'credentials' | 'sms-otp';
+type Step = 'credentials' | 'email-otp';
 type Mode = 'login' | 'register';
 
 export default function LoginScreen() {
+  const { setUser, setProfile, setNeedsUsername } = useApp();
   const [mode, setMode]       = useState<Mode>('login');
   const [step, setStep]       = useState<Step>('credentials');
   const [email, setEmail]     = useState('');
   const [password, setPassword] = useState('');
-  const [phone, setPhone]     = useState('');
   const [otp, setOtp]         = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
   const [countdown, setCountdown] = useState(0);
   const [showPass, setShowPass] = useState(false);
-  const otpRefs = useRef<(TextInput | null)[]>([]);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Stocke temporairement le userId pour la vérification OTP
+  // userId retourné par Appwrite lors de la création de session OTP
   const pendingUserIdRef = useRef<string | null>(null);
 
-  const formatPhone = (p: string) => {
-    const cleaned = p.replace(/\D/g, '');
-    return cleaned.startsWith('0') ? '+33' + cleaned.slice(1) : '+' + cleaned;
-  };
+  const otpRefs = useRef<(TextInput | null)[]>([]);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   function startCountdown(seconds = 60) {
     setCountdown(seconds);
@@ -55,120 +57,111 @@ export default function LoginScreen() {
   async function handleCredentials() {
     if (!email.trim()) return Alert.alert('Erreur', 'Entre ton adresse email');
     if (password.length < 8) return Alert.alert('Erreur', 'Le mot de passe doit faire au moins 8 caractères');
-    if (mode === 'register' && !phone.trim()) return Alert.alert('Erreur', 'Entre ton numéro de téléphone pour la 2FA');
 
     setLoading(true);
 
-    if (mode === 'register') {
-      // Inscription : créer le compte avec email + password
-      const { data, error } = await supabase.auth.signUp({
-        email: email.trim().toLowerCase(),
-        password,
-        options: {
-          data: { phone: formatPhone(phone) },
-        },
-      });
+    try {
+      if (mode === 'register') {
+        // Création du compte Appwrite
+        const user = await account.create(ID.unique(), email.trim().toLowerCase(), password);
+        pendingUserIdRef.current = user.$id;
 
-      if (error) {
-        Alert.alert('Erreur', error.message);
-        setLoading(false);
-        return;
-      }
+        // Création du profil en base
+        await createProfile(user.$id, email.trim().toLowerCase(), null);
 
-      if (data.user) {
-        pendingUserIdRef.current = data.user.id;
-        // Met à jour le profil avec le téléphone
-        await supabase.from('profiles').update({
-          phone: formatPhone(phone),
-          email: email.trim().toLowerCase(),
-        }).eq('id', data.user.id);
+        // Envoi OTP email (2FA)
+        await sendEmailOtp(email.trim().toLowerCase());
 
-        // Envoie le SMS OTP
-        await sendSmsOtp(formatPhone(phone));
-      }
-
-    } else {
-      // Connexion : vérifier email + password
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: email.trim().toLowerCase(),
-        password,
-      });
-
-      if (error) {
-        Alert.alert('Identifiants incorrects', 'Vérifie ton email et ton mot de passe.');
-        setLoading(false);
-        return;
-      }
-
-      if (data.user) {
-        pendingUserIdRef.current = data.user.id;
-
-        // Récupérer le téléphone depuis le profil
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('phone')
-          .eq('id', data.user.id)
-          .single();
-
-        const userPhone = profile?.phone || '';
-        if (!userPhone) {
-          Alert.alert('Erreur', 'Aucun numéro de téléphone associé à ce compte. Contacte le support.');
-          await supabase.auth.signOut();
-          setLoading(false);
-          return;
-        }
+      } else {
+        // Connexion : créer une session email/password
+        const session = await account.createEmailPasswordSession(
+          email.trim().toLowerCase(),
+          password
+        );
+        pendingUserIdRef.current = session.userId;
 
         // Déconnecte temporairement — la session sera créée APRÈS la 2FA
-        await supabase.auth.signOut();
-        await sendSmsOtp(userPhone);
-        setPhone(userPhone);
+        await account.deleteSession('current');
+
+        // Envoi OTP email (2FA)
+        await sendEmailOtp(email.trim().toLowerCase());
       }
+    } catch (e: any) {
+      Alert.alert('Erreur', e?.message ?? 'Une erreur est survenue');
     }
 
     setLoading(false);
   }
 
-  async function sendSmsOtp(formattedPhone: string) {
-    const { error } = await supabase.auth.signInWithOtp({ phone: formattedPhone });
-    if (error) {
-      Alert.alert('Erreur SMS', error.message);
-      return;
+  async function sendEmailOtp(userEmail: string) {
+    try {
+      // Appwrite : crée un token OTP envoyé par email
+      const token = await account.createEmailToken(
+        pendingUserIdRef.current ?? ID.unique(),
+        userEmail
+      );
+      pendingUserIdRef.current = token.userId;
+      setStep('email-otp');
+      startCountdown(60);
+    } catch (e: any) {
+      Alert.alert('Erreur OTP', e?.message ?? 'Impossible d\'envoyer le code');
     }
-    setStep('sms-otp');
-    startCountdown(60);
   }
 
-  // ── Étape 2 : vérification SMS OTP ──────────────────────────
+  // ── Étape 2 : vérification OTP email ──────────────────────────
   async function verifyOtp() {
     const code = otp.join('');
     if (code.length < 6) return Alert.alert('Erreur', 'Entre le code à 6 chiffres');
+    if (!pendingUserIdRef.current) return;
+
     setLoading(true);
 
-    const formattedPhone = formatPhone(phone);
-    const { data, error } = await supabase.auth.verifyOtp({
-      phone: formattedPhone,
-      token: code,
-      type: 'sms',
-    });
+    try {
+      // Crée la session finale via le token OTP
+      const session = await account.createSession(pendingUserIdRef.current, code);
+      const user    = await account.get();
 
-    if (error) {
-      Alert.alert('Code incorrect', 'Vérifie le code reçu par SMS.');
+      // Charge le profil
+      let profileData = await getProfileById(user.$id);
+
+      // S'il n'existe pas encore (cas inscription), le créer
+      if (!profileData) {
+        profileData = await createProfile(user.$id, user.email, null);
+      }
+
+      // Mise à jour du bundle X3DH
+      try {
+        const bundle = await getIdentityBundle();
+        await updateProfile(user.$id, {
+          identity_key:      bundle.identityKey,
+          signed_pre_key:    bundle.signedPreKey,
+          signed_pre_key_id: bundle.signedPreKeyId,
+          public_key:        bundle.identityKey,
+        });
+        if (profileData) {
+          profileData = {
+            ...profileData,
+            identity_key:      bundle.identityKey,
+            signed_pre_key:    bundle.signedPreKey,
+            signed_pre_key_id: bundle.signedPreKeyId,
+            public_key:        bundle.identityKey,
+          };
+        }
+      } catch (e) {
+        console.warn('[login] X3DH bundle error', e);
+      }
+
+      setUser(user);
+      if (profileData) {
+        setProfile(profileData);
+        setNeedsUsername(!profileData.username);
+      }
+    } catch (e: any) {
+      Alert.alert('Code incorrect', 'Vérifie le code reçu par email.');
       setOtp(['', '', '', '', '', '']);
       otpRefs.current[0]?.focus();
-      setLoading(false);
-      return;
     }
 
-    if (data.session) {
-      // Pour une inscription : mettre à jour l'email dans le profil
-      if (mode === 'register') {
-        await supabase.from('profiles').update({
-          email: email.trim().toLowerCase(),
-          phone: formattedPhone,
-        }).eq('id', data.session.user.id);
-      }
-      // La session est détectée par le listener dans _layout.tsx
-    }
     setLoading(false);
   }
 
@@ -197,7 +190,7 @@ export default function LoginScreen() {
   }
 
   // ══════════════════════════════════════════════════════════
-  // RENDU — Étape 1 : email + mot de passe (+ téléphone si inscription)
+  // RENDU — Étape 1 : email + mot de passe
   // ══════════════════════════════════════════════════════════
   if (step === 'credentials') return (
     <KeyboardAvoidingView
@@ -273,27 +266,6 @@ export default function LoginScreen() {
           </View>
           <Text style={styles.spacer} />
 
-          {/* Téléphone (seulement à l'inscription) */}
-          {mode === 'register' && (
-            <>
-              <Text style={styles.label}>Numéro de téléphone (pour la 2FA)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="+33 6 12 34 56 78"
-                placeholderTextColor="#444"
-                value={phone}
-                onChangeText={setPhone}
-                keyboardType="phone-pad"
-                autoComplete="tel"
-              />
-              <View style={styles.infoBox}>
-                <Text style={styles.infoText}>
-                  🔐 Un code SMS sera envoyé à chaque connexion pour vérifier ton identité.
-                </Text>
-              </View>
-            </>
-          )}
-
           <TouchableOpacity
             style={[styles.btn, loading && styles.btnDisabled]}
             onPress={handleCredentials}
@@ -307,20 +279,18 @@ export default function LoginScreen() {
             }
           </TouchableOpacity>
 
-          {mode === 'login' && (
-            <View style={styles.twoFaHint}>
-              <Text style={styles.twoFaHintText}>
-                🔒 Après vérification, un SMS de confirmation sera envoyé sur ton téléphone.
-              </Text>
-            </View>
-          )}
+          <View style={styles.twoFaHint}>
+            <Text style={styles.twoFaHintText}>
+              🔒 Un code de vérification sera envoyé à ton adresse email.
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 
   // ══════════════════════════════════════════════════════════
-  // RENDU — Étape 2 : saisie du code SMS
+  // RENDU — Étape 2 : saisie du code email OTP
   // ══════════════════════════════════════════════════════════
   return (
     <KeyboardAvoidingView
@@ -330,17 +300,17 @@ export default function LoginScreen() {
       <View style={styles.scroll}>
         <View style={styles.logo}>
           <View style={[styles.logoIcon, { backgroundColor: '#1a1a2e' }]}>
-            <Text style={styles.logoEmoji}>📱</Text>
+            <Text style={styles.logoEmoji}>📧</Text>
           </View>
           <Text style={styles.logoText}>Double vérification</Text>
-          <Text style={styles.logoSub}>Confirme ton identité par SMS</Text>
+          <Text style={styles.logoSub}>Confirme ton identité par email</Text>
         </View>
 
         <View style={styles.card}>
           <Text style={styles.otpTitle}>Code de vérification</Text>
           <Text style={styles.otpDesc}>
-            Un SMS a été envoyé au{'\n'}
-            <Text style={styles.phoneHighlight}>{formatPhone(phone)}</Text>
+            Un email a été envoyé à{'\n'}
+            <Text style={styles.phoneHighlight}>{email}</Text>
           </Text>
 
           <View style={styles.otpRow}>
@@ -377,7 +347,7 @@ export default function LoginScreen() {
 
           <TouchableOpacity
             style={styles.resendBtn}
-            onPress={() => sendSmsOtp(formatPhone(phone))}
+            onPress={() => sendEmailOtp(email.trim().toLowerCase())}
             disabled={countdown > 0 || loading}
           >
             <Text style={[styles.resendText, countdown > 0 && styles.resendDisabled]}>
@@ -437,12 +407,6 @@ const styles = StyleSheet.create({
   eyeIcon: { fontSize: 18 },
   spacer: { height: 0 },
 
-  infoBox: {
-    backgroundColor: '#0a0a1a', borderRadius: 10, padding: 12,
-    borderWidth: 1, borderColor: '#1a1a30', marginBottom: 16,
-  },
-  infoText: { color: '#667', fontSize: 12, lineHeight: 18 },
-
   btn: {
     backgroundColor: ROSE, borderRadius: 12,
     padding: 16, alignItems: 'center', marginTop: 4,
@@ -456,7 +420,6 @@ const styles = StyleSheet.create({
   },
   twoFaHintText: { color: '#555', fontSize: 12, lineHeight: 18, textAlign: 'center' },
 
-  // OTP
   otpTitle: { fontSize: 22, fontWeight: '800', color: '#fff', marginBottom: 8 },
   otpDesc: { fontSize: 14, color: '#666', marginBottom: 24, lineHeight: 20 },
   phoneHighlight: { color: ROSE, fontWeight: '700' },
