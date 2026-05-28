@@ -1,8 +1,8 @@
 /**
- * chat.tsx — Écran de messagerie
+ * chat.tsx — Écran de messagerie (Appwrite)
  *
  * Les messages sont stockés UNIQUEMENT en local (SQLite via localDb.ts).
- * Supabase = transit éphémère. Aucune persistance serveur.
+ * Appwrite = transit éphémère. Aucune persistance serveur.
  * Chiffrement Double Ratchet avec PFS à chaque message.
  */
 
@@ -12,7 +12,13 @@ import {
   StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../src/lib/supabase';
+import {
+  databases,
+  DATABASE_ID,
+  COLLECTION_PROFILES,
+  getProfileById,
+  updateProfile,
+} from '../../src/lib/appwrite';
 import { useApp } from '../../src/context/AppContext';
 import {
   sendMessage,
@@ -22,6 +28,7 @@ import {
 import { getIdentityBundle, rotateSignedPreKey } from '../../src/lib/crypto';
 import { scheduleLocalNotification } from '../../src/lib/notifications';
 import { LocalMessage, markRead } from '../../src/lib/localDb';
+import * as SecureStore from 'expo-secure-store';
 
 const KEY_ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours
 const LAST_KEY_ROTATION_KEY     = 'last_key_rotation';
@@ -32,7 +39,7 @@ export default function ChatScreen() {
   const [text, setText]         = useState('');
   const [sending, setSending]   = useState(false);
   const [loading, setLoading]   = useState(true);
-  const [partnerPhone, setPartnerPhone] = useState('');
+  const [partnerUsername, setPartnerUsername] = useState('');
   const flatRef = useRef<FlatList>(null);
 
   // ── Rotation des clés (Signed PreKey) ─────────────────────
@@ -40,52 +47,51 @@ export default function ChatScreen() {
     async function maybeRotateKey() {
       if (!profile) return;
       try {
-        const raw = await import('expo-secure-store').then(m =>
-          m.getItemAsync(LAST_KEY_ROTATION_KEY)
-        );
+        const raw  = await SecureStore.getItemAsync(LAST_KEY_ROTATION_KEY);
         const last = raw ? Number(raw) : 0;
         if (Date.now() - last > KEY_ROTATION_INTERVAL_MS) {
           const { publicKey, id } = await rotateSignedPreKey();
-          await supabase
-            .from('profiles')
-            .update({ signed_pre_key: publicKey, signed_pre_key_id: id })
-            .eq('id', profile.id);
-          await import('expo-secure-store').then(m =>
-            m.setItemAsync(LAST_KEY_ROTATION_KEY, String(Date.now()))
-          );
+          await updateProfile(profile.$id, {
+            signed_pre_key:    publicKey,
+            signed_pre_key_id: id,
+          });
+          await SecureStore.setItemAsync(LAST_KEY_ROTATION_KEY, String(Date.now()));
         }
       } catch {}
     }
     maybeRotateKey();
-  }, [profile?.id]);
+  }, [profile?.$id]);
 
   // ── Chargement du partenaire ───────────────────────────────
   useEffect(() => {
     if (!profile?.partner_id) { setLoading(false); return; }
-    supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', profile.partner_id)
-      .single()
-      .then(({ data }) => {
-        if (data) setPartner(data);
-        setLoading(false);
-      });
+    getProfileById(profile.partner_id).then((data) => {
+      if (data) setPartner(data);
+      setLoading(false);
+    });
   }, [profile?.partner_id]);
 
   // ── Chargement de l'historique local ──────────────────────
   useEffect(() => {
     if (!partner) return;
-    getMessages(partner.id).then(setMessages);
-  }, [partner?.id]);
+    getMessages(partner.$id).then(setMessages);
+  }, [partner?.$id]);
 
-  // ── Abonnement temps réel ──────────────────────────────────
+  // ── Abonnement temps réel Appwrite ─────────────────────────
   useEffect(() => {
     if (!profile || !partner) return;
 
     const unsub = subscribeToMessages(
-      profile.id,
-      partner,
+      profile.$id,
+      {
+        id:                partner.$id,
+        display_name:      partner.display_name,
+        phone:             partner.phone ?? '',
+        identity_key:      partner.identity_key,
+        signed_pre_key:    partner.signed_pre_key,
+        signed_pre_key_id: partner.signed_pre_key_id,
+        public_key:        partner.public_key,
+      },
       { identityKey: profile.identity_key },
       (msg) => {
         setMessages(prev => [...prev, msg]);
@@ -95,14 +101,23 @@ export default function ChatScreen() {
     );
 
     return unsub;
-  }, [profile?.id, partner?.id]);
+  }, [profile?.$id, partner?.$id]);
 
   // ── Envoi ──────────────────────────────────────────────────
   const handleSend = useCallback(async () => {
     if (!text.trim() || !profile || !partner) return;
     setSending(true);
 
-    const msg = await sendMessage(text.trim(), profile.id, partner);
+    const msg = await sendMessage(text.trim(), profile.$id, {
+      id:                partner.$id,
+      display_name:      partner.display_name,
+      phone:             partner.phone ?? '',
+      identity_key:      partner.identity_key,
+      signed_pre_key:    partner.signed_pre_key,
+      signed_pre_key_id: partner.signed_pre_key_id,
+      public_key:        partner.public_key,
+    });
+
     if (msg) {
       setMessages(prev => [...prev, msg]);
       setText('');
@@ -111,21 +126,13 @@ export default function ChatScreen() {
     setSending(false);
   }, [text, profile, partner]);
 
-  // ── Connexion partenaire ───────────────────────────────────
+  // ── Connexion partenaire (fallback username) ───────────────
   async function connectPartner() {
-    if (!partnerPhone) return;
-    const cleaned = partnerPhone.replace(/\D/g, '');
-    const phone   = cleaned.startsWith('0') ? '+33' + cleaned.slice(1) : '+' + cleaned;
-    const { data } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('phone', phone)
-      .single();
-    if (!data) return alert('Numéro introuvable');
-    await supabase
-      .from('profiles')
-      .update({ partner_id: data.id })
-      .eq('id', profile!.id);
+    if (!partnerUsername) return;
+    const { getProfileByUsername } = await import('../../src/lib/appwrite');
+    const data = await getProfileByUsername(partnerUsername.replace('@', '').trim().toLowerCase());
+    if (!data) return alert('Utilisateur introuvable');
+    await updateProfile(profile!.$id, { partner_id: data.$id, partner_locked: true });
     setPartner(data);
   }
 
@@ -133,11 +140,9 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!partner || !profile) return;
     messages
-      .filter(m => m.sender_id === partner.id && !m.read_at)
+      .filter(m => m.sender_id === partner.$id && !m.read_at)
       .forEach(m => markRead(m.id));
   }, [messages.length]);
-
-  // ── Rendu ──────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -157,15 +162,15 @@ export default function ChatScreen() {
           <Text style={styles.noPartnerIcon}>💑</Text>
           <Text style={styles.noPartnerTitle}>Connecte ton partenaire</Text>
           <Text style={styles.noPartnerSub}>
-            Entre son numéro pour commencer à chatter de façon sécurisée
+            Entre son @username pour commencer à chatter de façon sécurisée
           </Text>
           <TextInput
             style={styles.input}
-            placeholder="+33 6 12 34 56 78"
+            placeholder="@username"
             placeholderTextColor="#555"
-            value={partnerPhone}
-            onChangeText={setPartnerPhone}
-            keyboardType="phone-pad"
+            value={partnerUsername}
+            onChangeText={setPartnerUsername}
+            autoCapitalize="none"
           />
           <TouchableOpacity style={styles.connectBtn} onPress={connectPartner}>
             <Text style={styles.connectBtnText}>Connecter</Text>
@@ -181,7 +186,6 @@ export default function ChatScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={0}
     >
-      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerAvatar}>
           <Text style={styles.headerAvatarText}>
@@ -194,7 +198,6 @@ export default function ChatScreen() {
         </View>
       </View>
 
-      {/* Liste des messages */}
       <FlatList
         ref={flatRef}
         data={messages}
@@ -202,7 +205,7 @@ export default function ChatScreen() {
         contentContainerStyle={styles.messageList}
         onContentSizeChange={() => flatRef.current?.scrollToEnd({ animated: false })}
         renderItem={({ item }) => {
-          const isMe = item.sender_id === profile?.id;
+          const isMe = item.sender_id === profile?.$id;
           return (
             <View style={[styles.bubble, isMe ? styles.bubbleMe : styles.bubbleThem]}>
               <Text style={[styles.bubbleText, isMe ? styles.bubbleTextMe : styles.bubbleTextThem]}>
@@ -225,7 +228,6 @@ export default function ChatScreen() {
         }}
       />
 
-      {/* Zone de saisie */}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.textInput}
@@ -252,62 +254,31 @@ export default function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0a0a0f' },
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20,
-    backgroundColor: '#12121a', borderBottomWidth: 1, borderBottomColor: '#1e1e2e',
-  },
-  headerAvatar: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center',
-  },
+  container:        { flex: 1, backgroundColor: '#0a0a0f' },
+  header:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#12121a', borderBottomWidth: 1, borderBottomColor: '#1e1e2e' },
+  headerAvatar:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center' },
   headerAvatarText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   headerTitle:      { color: '#fff', fontWeight: '700', fontSize: 17 },
   headerSub:        { color: '#555', fontSize: 11, marginTop: 2 },
   messageList:      { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
-  bubble: {
-    maxWidth: '80%', borderRadius: 18,
-    paddingHorizontal: 14, paddingVertical: 10,
-  },
-  bubbleMe:        { alignSelf: 'flex-end',   backgroundColor: '#7c3aed', borderBottomRightRadius: 4 },
-  bubbleThem:      { alignSelf: 'flex-start', backgroundColor: '#1e1e2e', borderBottomLeftRadius: 4 },
-  bubbleText:      { fontSize: 15, lineHeight: 20 },
-  bubbleTextMe:    { color: '#fff' },
-  bubbleTextThem:  { color: '#e0e0e0' },
-  bubbleMeta: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'flex-end', gap: 4, marginTop: 4,
-  },
-  bubbleTime:     { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
-  deliveryIcon:   { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
-  inputRow: {
-    flexDirection: 'row', alignItems: 'flex-end', gap: 8,
-    paddingHorizontal: 16, paddingVertical: 12,
-    backgroundColor: '#12121a', borderTopWidth: 1, borderTopColor: '#1e1e2e',
-  },
-  textInput: {
-    flex: 1, backgroundColor: '#0a0a0f', borderRadius: 20,
-    paddingHorizontal: 16, paddingVertical: 10,
-    color: '#fff', fontSize: 15, maxHeight: 120,
-    borderWidth: 1, borderColor: '#1e1e2e',
-  },
-  sendBtn: {
-    width: 44, height: 44, borderRadius: 22,
-    backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center',
-  },
-  sendBtnDisabled: { opacity: 0.4 },
-  noPartner:       { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
-  noPartnerIcon:   { fontSize: 56, marginBottom: 16 },
-  noPartnerTitle:  { color: '#fff', fontSize: 22, fontWeight: '700', textAlign: 'center' },
-  noPartnerSub:    { color: '#666', fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 24 },
-  input: {
-    width: '100%', backgroundColor: '#12121a', borderRadius: 12,
-    padding: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#1e1e2e',
-  },
-  connectBtn: {
-    backgroundColor: '#7c3aed', borderRadius: 12, padding: 16,
-    alignItems: 'center', width: '100%', marginTop: 12,
-  },
-  connectBtnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
+  bubble:           { maxWidth: '80%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
+  bubbleMe:         { alignSelf: 'flex-end',   backgroundColor: '#7c3aed', borderBottomRightRadius: 4 },
+  bubbleThem:       { alignSelf: 'flex-start', backgroundColor: '#1e1e2e', borderBottomLeftRadius: 4 },
+  bubbleText:       { fontSize: 15, lineHeight: 20 },
+  bubbleTextMe:     { color: '#fff' },
+  bubbleTextThem:   { color: '#e0e0e0' },
+  bubbleMeta:       { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 4, marginTop: 4 },
+  bubbleTime:       { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
+  deliveryIcon:     { color: 'rgba(255,255,255,0.4)', fontSize: 10 },
+  inputRow:         { flexDirection: 'row', alignItems: 'flex-end', gap: 8, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: '#12121a', borderTopWidth: 1, borderTopColor: '#1e1e2e' },
+  textInput:        { flex: 1, backgroundColor: '#0a0a0f', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: '#fff', fontSize: 15, maxHeight: 120, borderWidth: 1, borderColor: '#1e1e2e' },
+  sendBtn:          { width: 44, height: 44, borderRadius: 22, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center' },
+  sendBtnDisabled:  { opacity: 0.4 },
+  noPartner:        { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 },
+  noPartnerIcon:    { fontSize: 56, marginBottom: 16 },
+  noPartnerTitle:   { color: '#fff', fontSize: 22, fontWeight: '700', textAlign: 'center' },
+  noPartnerSub:     { color: '#666', fontSize: 14, textAlign: 'center', marginTop: 8, marginBottom: 24 },
+  input:            { width: '100%', backgroundColor: '#12121a', borderRadius: 12, padding: 14, color: '#fff', fontSize: 16, borderWidth: 1, borderColor: '#1e1e2e' },
+  connectBtn:       { backgroundColor: '#7c3aed', borderRadius: 12, padding: 16, alignItems: 'center', width: '100%', marginTop: 12 },
+  connectBtnText:   { color: '#fff', fontWeight: '700', fontSize: 16 },
 });
