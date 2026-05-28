@@ -1,12 +1,5 @@
 /**
  * home.tsx — Page d'accueil / liaison partenaire (Appwrite)
- *
- * Affiché quand l'utilisateur est connecté mais n'a pas encore de partenaire.
- * Permet de rechercher un/une partenaire par son @username.
- *
- * Une fois lié(e) :
- *   - La liaison est PERMANENTE (impossible de délier)
- *   - Accès complet à l'application
  */
 
 import { useState, useEffect } from 'react';
@@ -57,6 +50,16 @@ export default function HomeScreen() {
     }
   }, [found]);
 
+  // Profil pas encore chargé depuis Appwrite
+  if (!profile) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator color={ROSE} size="large" />
+        <Text style={styles.loadingText}>Chargement du profil…</Text>
+      </View>
+    );
+  }
+
   async function searchPartner() {
     const cleaned = query.replace('@', '').trim().toLowerCase();
     if (!cleaned) return;
@@ -105,7 +108,6 @@ export default function HomeScreen() {
 
             setProfile(updated);
 
-            // Charger le profil partenaire complet
             const partnerFull = await getProfileById(found!.$id);
             if (partnerFull) setPartner(partnerFull);
 
@@ -125,7 +127,7 @@ export default function HomeScreen() {
       <View style={styles.inner}>
         <View style={styles.header}>
           <Text style={styles.headerGreet}>
-            Salut @{profile?.username || '...'} 👋
+            Salut @{profile.username} 👋
           </Text>
           <Text style={styles.headerTitle}>Trouve ton partenaire</Text>
           <Text style={styles.headerSub}>
@@ -200,7 +202,7 @@ export default function HomeScreen() {
 
         <View style={styles.myUsernameBox}>
           <Text style={styles.myUsernameLabel}>Mon username (à partager avec mon/ma partenaire)</Text>
-          <Text style={styles.myUsername}>@{profile?.username}</Text>
+          <Text style={styles.myUsername}>@{profile.username}</Text>
         </View>
       </View>
     </KeyboardAvoidingView>
@@ -213,6 +215,8 @@ const CARD = '#13131f';
 const BORDER = '#1e1e30';
 
 const styles = StyleSheet.create({
+  loadingContainer: { flex: 1, backgroundColor: DEEP, justifyContent: 'center', alignItems: 'center', gap: 16 },
+  loadingText: { color: '#555', fontSize: 14 },
   container: { flex: 1, backgroundColor: DEEP },
   inner: { flex: 1, paddingHorizontal: 24, paddingTop: 60, paddingBottom: 30 },
   header: { marginBottom: 32 },
