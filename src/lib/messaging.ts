@@ -1,19 +1,24 @@
 /**
- * messaging.ts — Couche de messagerie sécurisée
+ * messaging.ts — Couche de messagerie sécurisée (Appwrite)
  *
  * Responsabilités :
  *   1. Chiffrer avec Double Ratchet avant tout envoi
- *   2. Transmettre via Supabase Realtime (transit pur — pas de persistance serveur)
+ *   2. Transmettre via Appwrite Database (transit pur — pas de persistance serveur)
  *   3. Recevoir, déchiffrer, stocker localement avec expo-sqlite
  *   4. Gérer la suppression automatique côté serveur après livraison
  *
- * Le serveur Supabase ne voit que des blobs chiffrés en transit.
- * Même Supabase ne peut pas lire les messages.
+ * Le serveur Appwrite ne voit que des blobs chiffrés en transit.
  */
 
 import 'react-native-get-random-values';
 import { v4 as uuidv4 } from 'uuid';
-import { supabase } from './supabase';
+import {
+  databases,
+  subscribeTransitMessages,
+  DATABASE_ID,
+  COLLECTION_TRANSIT_MESSAGES,
+  type TransitMessage,
+} from './appwrite';
 import {
   ratchetEncrypt,
   ratchetDecrypt,
@@ -50,13 +55,13 @@ export interface PartnerProfile {
 // ─────────────────────────────────────────────
 
 /**
- * Envoie un message chiffré au partenaire.
+ * Envoie un message chiffré au partenaire via Appwrite.
  *
  * Flow :
  *   1. Si pas de session → X3DH initiation
  *   2. Double Ratchet encrypt
  *   3. Stockage local immédiat
- *   4. Transit via Supabase (channel ephemeral)
+ *   4. Transit via Appwrite Database
  */
 export async function sendMessage(
   plaintext: string,
@@ -101,17 +106,19 @@ export async function sendMessage(
     };
     await insertMessage(local);
 
-    // 4. Transit via Supabase Realtime broadcast
-    //    On utilise insert dans la table transit (TTL court via trigger Postgres)
-    const payload = {
-      id:          msgId,
-      sender_id:   myId,
-      receiver_id: partner.id,
-      envelope:    JSON.stringify(envelope), // blob opaque chiffré
-      expires_at:  new Date(now + 30_000).toISOString(), // 30 s TTL
-    };
-
-    await supabase.from('transit_messages').insert(payload);
+    // 4. Transit via Appwrite Database (TTL géré par une Appwrite Function ou scheduled job)
+    await databases.createDocument(
+      DATABASE_ID,
+      COLLECTION_TRANSIT_MESSAGES,
+      msgId,
+      {
+        sender_id:    myId,
+        receiver_id:  partner.id,
+        envelope:     JSON.stringify(envelope), // blob opaque chiffré
+        expires_at:   new Date(now + 30_000).toISOString(), // 30 s TTL
+        delivered_at: null,
+      }
+    );
 
     return local;
   } catch (e) {
@@ -125,11 +132,11 @@ export async function sendMessage(
 // ─────────────────────────────────────────────
 
 /**
- * Traite un message entrant depuis Supabase Realtime.
+ * Traite un message entrant depuis Appwrite Realtime.
  * Déchiffre, stocke localement, accuse réception (pour suppression serveur).
  */
 export async function receiveMessage(
-  raw: any,
+  raw: TransitMessage,
   myId: string,
   partner: PartnerProfile,
   myBundle: { identityKey: string }
@@ -155,7 +162,7 @@ export async function receiveMessage(
 
     // Stockage local
     const local: LocalMessage = {
-      id:         raw.id,
+      id:         raw.$id,
       partner_id: partner.id,
       sender_id:  partner.id,
       plaintext,
@@ -163,17 +170,19 @@ export async function receiveMessage(
       nonce:      envelope.nonce,
       dh_pub:     envelope.dhPub,
       msg_n:      envelope.n,
-      created_at: new Date(raw.created_at ?? Date.now()).getTime(),
+      created_at: new Date(raw.$createdAt ?? Date.now()).getTime(),
       delivered:  true,
       read_at:    null,
     };
     await insertMessage(local);
 
-    // Accusé de réception → déclenche suppression serveur
-    await supabase
-      .from('transit_messages')
-      .update({ delivered_at: new Date().toISOString() })
-      .eq('id', raw.id);
+    // Accusé de réception → déclenche suppression serveur via Appwrite Function
+    await databases.updateDocument(
+      DATABASE_ID,
+      COLLECTION_TRANSIT_MESSAGES,
+      raw.$id,
+      { delivered_at: new Date().toISOString() }
+    );
 
     return local;
   } catch (e) {
@@ -187,7 +196,7 @@ export async function receiveMessage(
 // ─────────────────────────────────────────────
 
 /**
- * Ouvre un canal Supabase Realtime pour recevoir les messages entrants.
+ * Ouvre un canal Appwrite Realtime pour recevoir les messages entrants.
  * Retourne une fonction de nettoyage.
  */
 export function subscribeToMessages(
@@ -196,29 +205,12 @@ export function subscribeToMessages(
   myBundle: { identityKey: string },
   onMessage: (msg: LocalMessage) => void
 ): () => void {
-  const channel = supabase
-    .channel(`transit_${myId}`)
-    .on(
-      'postgres_changes',
-      {
-        event:  'INSERT',
-        schema: 'public',
-        table:  'transit_messages',
-        filter: `receiver_id=eq.${myId}`,
-      },
-      async (payload) => {
-        const raw = payload.new as any;
-        if (raw.sender_id !== partner.id) return;
+  return subscribeTransitMessages(myId, async (raw) => {
+    if (raw.sender_id !== partner.id) return;
 
-        const msg = await receiveMessage(raw, myId, partner, myBundle);
-        if (msg) onMessage(msg);
-      }
-    )
-    .subscribe();
-
-  return () => {
-    supabase.removeChannel(channel);
-  };
+    const msg = await receiveMessage(raw, myId, partner, myBundle);
+    if (msg) onMessage(msg);
+  });
 }
 
 // ─────────────────────────────────────────────
