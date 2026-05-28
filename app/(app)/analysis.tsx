@@ -2,17 +2,18 @@
  * AnalysisScreen — Phi-3 Mini Edition
  */
 
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
   StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { useAppStore } from '../../src/store/appStore';
+import { useApp } from '../../src/context/AppContext';
 import { analyzeWithPhi3, type CommunicationScore } from '../../src/lib/phi3/analyzer';
 import { ModelSetupCard } from '../../src/components/ModelSetupCard';
 import { usePhiModel } from '../../src/hooks/usePhiModel';
 import { supabase } from '../../src/lib/supabase';
+import { getMessages, LocalMessage } from '../../src/lib/localDb';
 
 const RED_COLORS: Record<string, string> = {
   control: '#ef4444', jealousy: '#f97316', manipulation: '#dc2626',
@@ -59,12 +60,19 @@ function CategoryBar({ label, value }: { label: string; value: number }) {
 }
 
 export default function AnalysisScreen() {
-  const { messages, profile, partner } = useAppStore();
+  const { profile, partner } = useApp();
+  const [messages, setMessages] = useState<LocalMessage[]>([]);
   const [result, setResult] = useState<CommunicationScore | null>(null);
   const [loading, setLoading] = useState(false);
   const [streamText, setStreamText] = useState('');
   const [saved, setSaved] = useState(false);
   const phi = usePhiModel();
+
+  // Charger les messages depuis SQLite
+  useEffect(() => {
+    if (!partner) return;
+    getMessages(partner.id).then(setMessages);
+  }, [partner?.id]);
 
   const messagesToAnalyze = useMemo(() => {
     if (!profile || !partner) return [];
