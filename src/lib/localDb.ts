@@ -49,6 +49,17 @@ async function initSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       event       TEXT NOT NULL,
       ts          INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000)
     );
+
+    CREATE TABLE IF NOT EXISTS flag_scores (
+      partner_id   TEXT PRIMARY KEY,
+      red_count    INTEGER NOT NULL DEFAULT 0,
+      green_count  INTEGER NOT NULL DEFAULT 0,
+      total_score  INTEGER NOT NULL DEFAULT 50,
+      red_labels   TEXT NOT NULL DEFAULT '[]',
+      green_labels TEXT NOT NULL DEFAULT '[]',
+      analyzed_ids TEXT NOT NULL DEFAULT '[]',
+      updated_at   INTEGER NOT NULL DEFAULT 0
+    );
   `);
 }
 
@@ -148,6 +159,69 @@ export async function logKeyRotation(partnerId: string, event: string): Promise<
   await db.runAsync(
     `INSERT INTO ratchet_log (partner_id, event) VALUES (?, ?)`,
     [partnerId, event]
+  );
+}
+
+// ─────────────────────────────────────────────
+// Flag scores (analyse cumulative Phi-3)
+// ─────────────────────────────────────────────
+
+export interface FlagScore {
+  partner_id:   string;
+  red_count:    number;
+  green_count:  number;
+  total_score:  number;
+  red_labels:   string[];
+  green_labels: string[];
+  analyzed_ids: string[]; // IDs des messages déjà analysés
+  updated_at:   number;
+}
+
+/** Récupère le score cumulé pour un partenaire */
+export async function getFlagScore(partnerId: string): Promise<FlagScore | null> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<any>(
+    `SELECT * FROM flag_scores WHERE partner_id = ?`,
+    [partnerId]
+  );
+  if (!row) return null;
+  return {
+    partner_id:   row.partner_id,
+    red_count:    row.red_count,
+    green_count:  row.green_count,
+    total_score:  row.total_score,
+    red_labels:   JSON.parse(row.red_labels  ?? '[]'),
+    green_labels: JSON.parse(row.green_labels ?? '[]'),
+    analyzed_ids: JSON.parse(row.analyzed_ids ?? '[]'),
+    updated_at:   row.updated_at,
+  };
+}
+
+/** Met à jour le score cumulé (upsert) */
+export async function saveFlagScore(score: FlagScore): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    `INSERT INTO flag_scores
+       (partner_id, red_count, green_count, total_score, red_labels, green_labels, analyzed_ids, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(partner_id) DO UPDATE SET
+       red_count    = excluded.red_count,
+       green_count  = excluded.green_count,
+       total_score  = excluded.total_score,
+       red_labels   = excluded.red_labels,
+       green_labels = excluded.green_labels,
+       analyzed_ids = excluded.analyzed_ids,
+       updated_at   = excluded.updated_at`,
+    [
+      score.partner_id,
+      score.red_count,
+      score.green_count,
+      score.total_score,
+      JSON.stringify(score.red_labels),
+      JSON.stringify(score.green_labels),
+      JSON.stringify(score.analyzed_ids),
+      score.updated_at,
+    ]
   );
 }
 
