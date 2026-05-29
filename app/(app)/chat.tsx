@@ -28,6 +28,7 @@ import {
 import { getIdentityBundle, rotateSignedPreKey } from '../../src/lib/crypto';
 import { scheduleLocalNotification } from '../../src/lib/notifications';
 import { LocalMessage, markRead } from '../../src/lib/localDb';
+import { useAnalysisQueue } from '../../src/hooks/useAnalysisQueue';
 import * as SecureStore from 'expo-secure-store';
 
 const KEY_ROTATION_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000; // 7 jours
@@ -41,6 +42,13 @@ export default function ChatScreen() {
   const [loading, setLoading]   = useState(true);
   const [partnerUsername, setPartnerUsername] = useState('');
   const flatRef = useRef<FlatList>(null);
+
+  // ── Analyse Phi-3 en file d'attente ───────────────────────
+  const { liveScore, status: analysisStatus, queueLength } = useAnalysisQueue(
+    messages,
+    partner?.$id,
+    profile?.$id
+  );
 
   // ── Rotation des clés (Signed PreKey) ─────────────────────
   useEffect(() => {
@@ -187,14 +195,45 @@ export default function ChatScreen() {
       keyboardVerticalOffset={0}
     >
       <View style={styles.header}>
-        <View style={styles.headerAvatar}>
-          <Text style={styles.headerAvatarText}>
-            {partner.display_name[0]?.toUpperCase()}
-          </Text>
+        <View style={styles.headerLeft}>
+          <View style={styles.headerAvatar}>
+            <Text style={styles.headerAvatarText}>
+              {partner.display_name[0]?.toUpperCase()}
+            </Text>
+          </View>
+          <View>
+            <Text style={styles.headerTitle}>{partner.display_name}</Text>
+            <Text style={styles.headerSub}>🔒 Double Ratchet · Clés locales</Text>
+          </View>
         </View>
-        <View>
-          <Text style={styles.headerTitle}>{partner.display_name}</Text>
-          <Text style={styles.headerSub}>🔒 Double Ratchet · Clés locales</Text>
+
+        {/* Compteur live flags */}
+        <View style={styles.flagCounter}>
+          {analysisStatus === 'analyzing' && (
+            <View style={styles.flagAnalyzing}>
+              <ActivityIndicator size="small" color="#a78bfa" />
+              {queueLength > 0 && (
+                <Text style={styles.flagQueueText}>{queueLength}</Text>
+              )}
+            </View>
+          )}
+          {analysisStatus === 'waiting_model' && (
+            <View style={styles.flagWaiting}>
+              <Text style={styles.flagWaitingText}>⏳ Phi-3</Text>
+            </View>
+          )}
+          {liveScore && (
+            <>
+              <View style={styles.flagBadge}>
+                <Text style={styles.flagBadgeEmoji}>🚩</Text>
+                <Text style={styles.flagBadgeCount}>{liveScore.redCount}</Text>
+              </View>
+              <View style={[styles.flagBadge, styles.flagBadgeGreen]}>
+                <Text style={styles.flagBadgeEmoji}>💚</Text>
+                <Text style={styles.flagBadgeCount}>{liveScore.greenCount}</Text>
+              </View>
+            </>
+          )}
         </View>
       </View>
 
@@ -255,11 +294,21 @@ export default function ChatScreen() {
 
 const styles = StyleSheet.create({
   container:        { flex: 1, backgroundColor: '#0a0a0f' },
-  header:           { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#12121a', borderBottomWidth: 1, borderBottomColor: '#1e1e2e' },
+  header:           { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingTop: 56, paddingBottom: 16, paddingHorizontal: 20, backgroundColor: '#12121a', borderBottomWidth: 1, borderBottomColor: '#1e1e2e' },
+  headerLeft:       { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
   headerAvatar:     { width: 40, height: 40, borderRadius: 20, backgroundColor: '#7c3aed', alignItems: 'center', justifyContent: 'center' },
   headerAvatarText: { color: '#fff', fontWeight: '700', fontSize: 16 },
   headerTitle:      { color: '#fff', fontWeight: '700', fontSize: 17 },
   headerSub:        { color: '#555', fontSize: 11, marginTop: 2 },
+  flagCounter:      { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  flagBadge:        { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#2d0a0a', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  flagBadgeGreen:   { backgroundColor: '#0a2d0a' },
+  flagBadgeEmoji:   { fontSize: 12 },
+  flagBadgeCount:   { color: '#fff', fontWeight: '800', fontSize: 13 },
+  flagAnalyzing:    { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#1a0a2d', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  flagQueueText:    { color: '#a78bfa', fontSize: 11, fontWeight: '700' },
+  flagWaiting:      { backgroundColor: '#1a1a0a', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
+  flagWaitingText:  { color: '#888', fontSize: 11 },
   messageList:      { paddingHorizontal: 16, paddingVertical: 12, gap: 8 },
   bubble:           { maxWidth: '80%', borderRadius: 18, paddingHorizontal: 14, paddingVertical: 10 },
   bubbleMe:         { alignSelf: 'flex-end',   backgroundColor: '#7c3aed', borderBottomRightRadius: 4 },
