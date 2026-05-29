@@ -32,26 +32,27 @@ function RootNav() {
         if (profileData) {
           setProfile(profileData);
           setNeedsUsername(!profileData.username);
+        } else {
+          // Profil introuvable → forcer setup username pour débloquer la navigation
+          setNeedsUsername(true);
         }
 
-        // Mise à jour du bundle X3DH
-        try {
-          const bundle = await getIdentityBundle();
-          await updateProfile(u.$id, {
-            identity_key:      bundle.identityKey,
-            signed_pre_key:    bundle.signedPreKey,
-            signed_pre_key_id: bundle.signedPreKeyId,
-            public_key:        bundle.identityKey,
-          });
-        } catch (e) {
-          console.warn('[layout] X3DH bundle error', e);
-        }
+        // Mise à jour du bundle X3DH en arrière-plan (ne bloque pas la navigation)
+        getIdentityBundle()
+          .then((bundle) =>
+            updateProfile(u.$id, {
+              identity_key:      bundle.identityKey,
+              signed_pre_key:    bundle.signedPreKey,
+              signed_pre_key_id: bundle.signedPreKeyId,
+              public_key:        bundle.identityKey,
+            })
+          )
+          .catch((e) => console.warn('[layout] X3DH bundle error', e));
 
-        // Push token
-        try {
-          const token = await registerForPushNotifications();
-          if (token) await savePushToken(u.$id, token);
-        } catch {}
+        // Push token en arrière-plan (ne bloque pas la navigation)
+        registerForPushNotifications()
+          .then((token) => { if (token) savePushToken(u.$id, token); })
+          .catch(() => {});
       })
       .catch(() => {
         // Pas de session — rester sur auth
