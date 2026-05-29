@@ -124,37 +124,31 @@ export default function LoginScreen() {
       // Charge le profil
       let profileData = await getProfileById(user.$id);
 
-      // S'il n'existe pas encore (cas inscription), le créer
+      // S'il n'existe pas encore (cas inscription ou profil manquant), le créer
       if (!profileData) {
         profileData = await createProfile(user.$id, user.email, null);
       }
 
-      // Mise à jour du bundle X3DH
-      try {
-        const bundle = await getIdentityBundle();
-        await updateProfile(user.$id, {
-          identity_key:      bundle.identityKey,
-          signed_pre_key:    bundle.signedPreKey,
-          signed_pre_key_id: bundle.signedPreKeyId,
-          public_key:        bundle.identityKey,
-        });
-        if (profileData) {
-          profileData = {
-            ...profileData,
+      // Mise à jour du bundle X3DH en arrière-plan (ne bloque pas la navigation)
+      getIdentityBundle()
+        .then(async (bundle) => {
+          await updateProfile(user.$id, {
             identity_key:      bundle.identityKey,
             signed_pre_key:    bundle.signedPreKey,
             signed_pre_key_id: bundle.signedPreKeyId,
             public_key:        bundle.identityKey,
-          };
-        }
-      } catch (e) {
-        console.warn('[login] X3DH bundle error', e);
-      }
+          });
+        })
+        .catch((e) => console.warn('[login] X3DH bundle error', e));
 
+      // Toujours appeler setUser + navigation, même si profileData est null
       setUser(user);
       if (profileData) {
         setProfile(profileData);
         setNeedsUsername(!profileData.username);
+      } else {
+        // Profil introuvable → forcer setup username pour débloquer la navigation
+        setNeedsUsername(true);
       }
     } catch (e: any) {
       Alert.alert('Code incorrect', 'Vérifie le code reçu par email.');
