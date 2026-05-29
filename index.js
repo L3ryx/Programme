@@ -11,8 +11,8 @@
 const { Client, Databases, Permission, Role } = require('node-appwrite');
 
 // ─── REMPLIS CES 3 VALEURS ───────────────────────────────────────────────────
-const PROJECT_ID  = 'TON_PROJECT_ID';   // Appwrite Console → ton projet → Settings → Project ID
-const API_KEY     = 'TON_API_KEY';      // Appwrite Console → ton projet → Settings → API Keys → Create
+const PROJECT_ID  = '6a181cc10003714ce4ba';   // Appwrite Console → ton projet → Settings → Project ID
+const API_KEY     = 'standard_5122190372febf55820076b9bd409f947b40631607e36aaea5e1a4b1c90e5b8f9e7fed477445e2021fd0ffebc36696b68b24409a59272599f40ef41e72449986acef64ab295cf25b204dc1d1e35e0d0a211f7c73e0b1766755f5e07d3f6ed0767a7e7199a9883a895dee0f3b926e95e838c80f7cce403a475f10d19971d3250a';      // Appwrite Console → ton projet → Settings → API Keys → Create
 const DATABASE_ID = 'adeux-db';         // l'ID de ta base visible dans l'URL
 // ─────────────────────────────────────────────────────────────────────────────
 
