@@ -13,12 +13,12 @@ import {
   ActivityIndicator, Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { databases, DATABASE_ID, COLLECTION_PROFILES, getProfileByUsername, updateProfile } from '../../src/lib/appwrite';
+import { databases, DATABASE_ID, COLLECTION_PROFILES, getProfileByUsername, updateProfile, createProfile } from '../../src/lib/appwrite';
 import { Query } from 'appwrite';
 import { useApp } from '../../src/context/AppContext';
 
 export default function SetupUsernameScreen() {
-  const { profile, setProfile, setNeedsUsername } = useApp();
+  const { user, profile, setProfile, setNeedsUsername } = useApp();
   const router = useRouter();
   const [username, setUsername] = useState('');
   const [checking, setChecking] = useState(false);
@@ -41,24 +41,43 @@ export default function SetupUsernameScreen() {
   }
 
   async function saveUsername() {
-    if (!isValid || !available || !profile) return;
+    if (!isValid || !available) return;
+    if (!user) { Alert.alert('Erreur', 'Session expirée, reconnecte-toi.'); return; }
+
     setSaving(true);
 
-    const updated = await updateProfile(profile.$id, {
-      username: username.toLowerCase(),
-    });
+    try {
+      let currentProfile = profile;
 
-    if (!updated) {
-      Alert.alert('Erreur', 'Ce nom d\'utilisateur est déjà pris.');
-      setAvailable(false);
+      // Si le profil n'existe pas encore, le créer maintenant
+      if (!currentProfile) {
+        currentProfile = await createProfile(user.$id, user.email ?? null, null);
+        if (!currentProfile) {
+          Alert.alert('Erreur', 'Impossible de créer ton profil. Réessaie.');
+          setSaving(false);
+          return;
+        }
+      }
+
+      const updated = await updateProfile(currentProfile.$id, {
+        username: username.toLowerCase(),
+      });
+
+      if (!updated) {
+        Alert.alert('Erreur', 'Ce nom d\'utilisateur est déjà pris.');
+        setAvailable(false);
+        setSaving(false);
+        return;
+      }
+
+      setProfile(updated);
+      setNeedsUsername(false);
       setSaving(false);
-      return;
+      router.replace('/(app)/home');
+    } catch (e) {
+      Alert.alert('Erreur', 'Une erreur est survenue. Réessaie.');
+      setSaving(false);
     }
-
-    setProfile(updated);
-    setNeedsUsername(false);
-    setSaving(false);
-    router.replace('/(app)/home');
   }
 
   return (
